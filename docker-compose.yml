@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - avito-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  migrations:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrations
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    networks:
+      - avito-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      APP_PORT: ${APP_PORT:-8080}
+      APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
+    networks:
+      - avito-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  venue-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.venue
+    restart: unless-stopped
+    ports:
+      - "${VENUE_SERVICE_PORT:-8081}:8081"
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      MAIN_API_URL: http://app:8080
+      VENUE_API_KEY: ${VENUE_API_KEY}
+      VENUE_SERVICE_PORT: ${VENUE_SERVICE_PORT:-8081}
+    networks:
+      - avito-network
+
+volumes:
+  pgdata:
+
+networks:
+  avito-network:
+    driver: bridge
