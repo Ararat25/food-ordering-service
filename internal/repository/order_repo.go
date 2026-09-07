@@ -1,0 +1,278 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+
+	sq "github.com/Masterminds/squirrel"
+	"github.com/google/uuid"
+
+	"avito-kitchen/internal/domain"
+)
+
+// OrderRepo - заказы в базе данных.
+type OrderRepo struct {
+	db *sql.DB // соединение с базой
+}
+
+// NewOrderRepo - создаёт репозиторий заказов.
+func NewOrderRepo(db *sql.DB) *OrderRepo {
+	return &OrderRepo{db: db}
+}
+
+// Create - сохраняет заказ без позиций.
+func (r *OrderRepo) Create(ctx context.Context, order *domain.Order) error {
+	query, args, err := sb.Insert("orders").
+		Columns("id", "user_id", "venue_id", "status", "delivery_type",
+			"delivery_address", "delivery_time", "estimated_delivery_time",
+			"comment", "total_amount").
+		Values(order.ID, order.UserID, order.VenueID, order.Status, order.DeliveryType,
+			order.DeliveryAddress, order.DeliveryTime, order.EstimatedDeliveryTime,
+			order.Comment, order.TotalAmount).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build query: %w", err)
+	}
+
+	_, err = r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("insert order: %w", err)
+	}
+
+	return nil
+}
+
+// CreateWithItems - сохраняет заказ с позициями и платежом в одной транзакции.
+func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, items []domain.OrderItem) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	orderQuery, orderArgs, err := sb.Insert("orders").
+		Columns("id", "user_id", "venue_id", "status", "delivery_type",
+			"delivery_address", "delivery_time", "estimated_delivery_time",
+			"comment", "total_amount").
+		Values(order.ID, order.UserID, order.VenueID, order.Status, order.DeliveryType,
+			order.DeliveryAddress, order.DeliveryTime, order.EstimatedDeliveryTime,
+			order.Comment, order.TotalAmount).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build order query: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, orderQuery, orderArgs...); err != nil {
+		return fmt.Errorf("insert order: %w", err)
+	}
+
+	for _, item := range items {
+		itemQuery, itemArgs, err := sb.Insert("order_items").
+			Columns("id", "order_id", "menu_item_id", "quantity", "price", "options").
+			Values(item.ID, item.OrderID, item.MenuItemID, item.Quantity, item.Price, item.Options).
+			ToSql()
+		if err != nil {
+			return fmt.Errorf("build item query: %w", err)
+		}
+
+		if _, err := tx.ExecContext(ctx, itemQuery, itemArgs...); err != nil {
+			return fmt.Errorf("insert order item: %w", err)
+		}
+	}
+
+	paymentQuery, paymentArgs, err := sb.Insert("payments").
+		Columns("id", "order_id", "status", "amount", "method").
+		Values(uuid.New().String(), order.ID, domain.PaymentStatusPending, order.TotalAmount, "card").
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build payment query: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, paymentQuery, paymentArgs...); err != nil {
+		return fmt.Errorf("insert payment: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// GetByID - находит заказ по id.
+func (r *OrderRepo) GetByID(ctx context.Context, id string) (*domain.Order, error) {
+	query, args, err := sb.Select("*").From("orders").Where(sq.Eq{"id": id}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	var order domain.Order
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(
+		&order.ID, &order.UserID, &order.VenueID, &order.Status, &order.DeliveryType,
+		&order.DeliveryAddress, &order.DeliveryTime, &order.EstimatedDeliveryTime,
+		&order.Comment, &order.TotalAmount, &order.CreatedAt, &order.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get order: %w", err)
+	}
+
+	return &order, nil
+}
+
+// ListByUser - возвращает заказы пользователя от новых к старым плюс общее число.
+func (r *OrderRepo) ListByUser(ctx context.Context, userID string, page, perPage int) ([]domain.Order, int, error) {
+	countQuery, countArgs, err := sb.Select("COUNT(*)").From("orders").
+		Where(sq.Eq{"user_id": userID}).ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build count query: %w", err)
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count orders: %w", err)
+	}
+
+	offset := (page - 1) * perPage
+	query, args, err := sb.Select("*").From("orders").
+		Where(sq.Eq{"user_id": userID}).
+		OrderBy("created_at DESC").
+		Limit(uint64(perPage)).
+		Offset(uint64(offset)).
+		ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build query: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list orders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orders []domain.Order
+	for rows.Next() {
+		var o domain.Order
+		if err := rows.Scan(
+			&o.ID, &o.UserID, &o.VenueID, &o.Status, &o.DeliveryType,
+			&o.DeliveryAddress, &o.DeliveryTime, &o.EstimatedDeliveryTime,
+			&o.Comment, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate orders (user): %w", err)
+	}
+
+	return orders, total, nil
+}
+
+// ListByVenue - возвращает заказы заведения с фильтром по статусу плюс общее число.
+func (r *OrderRepo) ListByVenue(ctx context.Context, venueID string, status string, page, perPage int) ([]domain.Order, int, error) {
+	baseQuery := sb.Select("*").From("orders").Where(sq.Eq{"venue_id": venueID})
+	countBaseQuery := sb.Select("COUNT(*)").From("orders").Where(sq.Eq{"venue_id": venueID})
+
+	if status != "" {
+		baseQuery = baseQuery.Where(sq.Eq{"status": status})
+		countBaseQuery = countBaseQuery.Where(sq.Eq{"status": status})
+	}
+
+	countQuery, countArgs, err := countBaseQuery.ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build count query: %w", err)
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count orders: %w", err)
+	}
+
+	offset := (page - 1) * perPage
+	query, args, err := baseQuery.OrderBy("created_at DESC").
+		Limit(uint64(perPage)).Offset(uint64(offset)).ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build query: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list orders: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var orders []domain.Order
+	for rows.Next() {
+		var o domain.Order
+		if err := rows.Scan(
+			&o.ID, &o.UserID, &o.VenueID, &o.Status, &o.DeliveryType,
+			&o.DeliveryAddress, &o.DeliveryTime, &o.EstimatedDeliveryTime,
+			&o.Comment, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan order: %w", err)
+		}
+		orders = append(orders, o)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate orders (venue): %w", err)
+	}
+
+	return orders, total, nil
+}
+
+// UpdateStatus - меняет статус заказа, чужой id даёт ErrNotFound.
+func (r *OrderRepo) UpdateStatus(ctx context.Context, id string, status domain.OrderStatus) error {
+	query, args, err := sb.Update("orders").
+		Set("status", status).
+		Set("updated_at", sq.Expr("NOW()")).
+		Where(sq.Eq{"id": id}).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build query: %w", err)
+	}
+
+	result, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update order status: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+
+	return nil
+}
+
+// GetItems - возвращает позиции заказа.
+func (r *OrderRepo) GetItems(ctx context.Context, orderID string) ([]domain.OrderItem, error) {
+	query, args, err := sb.Select("*").From("order_items").
+		Where(sq.Eq{"order_id": orderID}).
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list order items: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var items []domain.OrderItem
+	for rows.Next() {
+		var item domain.OrderItem
+		if err := rows.Scan(&item.ID, &item.OrderID, &item.MenuItemID, &item.Quantity, &item.Price, &item.Options, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan order item: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate order items: %w", err)
+	}
+
+	return items, nil
+}
