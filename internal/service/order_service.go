@@ -67,7 +67,7 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 			MenuItemID: ci.MenuItemID,
 			Quantity:   ci.Quantity,
 			Price:      menuItem.Price,
-			Options:    ci.Options,
+			Options:    normalizeOptions(ci.Options),
 		}
 		orderItems = append(orderItems, orderItem)
 	}
@@ -159,7 +159,7 @@ func validateTransition(from, to domain.OrderStatus) error {
 		}
 	}
 
-	return fmt.Errorf("invalid status transition from %s to %s", from, to)
+	return fmt.Errorf("%w: invalid status transition from %s to %s", domain.ErrValidation, from, to)
 }
 
 // GetItems - возвращает позиции заказа.
@@ -206,7 +206,7 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 			MenuItemID: item.MenuItemID,
 			Quantity:   item.Quantity,
 			Price:      menuItem.Price,
-			Options:    item.Options,
+			Options:    normalizeOptions(item.Options),
 		}
 		newItems = append(newItems, newItem)
 	}

@@ -84,7 +84,7 @@ func (s *CartService) AddItem(ctx context.Context, userID, venueID string, req d
 		CartID:     cart.ID,
 		MenuItemID: req.MenuItemID,
 		Quantity:   req.Quantity,
-		Options:    req.Options,
+		Options:    normalizeOptions(req.Options),
 	}
 
 	if err := s.cartRepo.AddItem(ctx, cartItem); err != nil {

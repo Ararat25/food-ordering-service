@@ -57,6 +57,7 @@ func (s *MenuService) CreateItem(ctx context.Context, item *domain.MenuItem) err
 	if item.ID == "" {
 		item.ID = uuid.New().String()
 	}
+	item.Options = normalizeOptions(item.Options)
 	return s.itemRepo.Create(ctx, item)
 }
 
@@ -69,6 +70,7 @@ func (s *MenuService) UpdateItem(ctx context.Context, item *domain.MenuItem) err
 	if existing.VenueID != item.VenueID {
 		return domain.ErrForbidden
 	}
+	item.Options = normalizeOptions(item.Options)
 	return s.itemRepo.Update(ctx, item)
 }
 
