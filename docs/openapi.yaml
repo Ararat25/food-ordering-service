@@ -1,0 +1,709 @@
+openapi: 3.1.0
+info:
+  title: Авито.Кухня API
+  version: 1.0.0
+  description: API для сервиса доставки еды Авито.Кухня
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+security:
+  BearerAuth:
+    - venue_api_key: []
+  UserIDHeader:
+    - user_id: []
+
+paths:
+  /health:
+    get:
+      summary: Healthcheck
+      tags: [Health]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /api/v1/venues:
+    get:
+      summary: Список заведений
+      tags: [Venues]
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Список заведений
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VenueList'
+
+  /api/v1/venues/{id}:
+    get:
+      summary: Детали заведения
+      tags: [Venues]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Заведение
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VenueResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/venues/{id}/menu:
+    get:
+      summary: Меню заведения
+      tags: [Menu]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Меню
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MenuItem'
+
+  /api/v1/venues/{id}/reviews:
+    get:
+      summary: Отзывы заведения
+      tags: [Reviews]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Отзывы
+    post:
+      summary: Оставить отзыв
+      tags: [Reviews]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReviewRequest'
+      responses:
+        '201':
+          description: Отзыв создан
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/cart:
+    get:
+      summary: Получить корзину
+      tags: [Cart]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: venue_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Корзина
+    delete:
+      summary: Очистить корзину
+      tags: [Cart]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: venue_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Корзина очищена
+
+  /api/v1/cart/items:
+    post:
+      summary: Добавить товар в корзину
+      tags: [Cart]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: venue_id
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddToCartRequest'
+      responses:
+        '200':
+          description: Товар добавлен
+
+  /api/v1/cart/items/{id}:
+    put:
+      summary: Обновить количество
+      tags: [Cart]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                quantity:
+                  type: integer
+      responses:
+        '200':
+          description: Обновлено
+    delete:
+      summary: Удалить товар из корзины
+      tags: [Cart]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Удалено
+
+  /api/v1/orders:
+    post:
+      summary: Создать заказ
+      tags: [Orders]
+      security:
+        - UserIDHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Заказ создан
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    get:
+      summary: Список заказов пользователя
+      tags: [Orders]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Заказы
+
+  /api/v1/orders/{id}:
+    get:
+      summary: Детали заказа
+      tags: [Orders]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Заказ
+
+  /api/v1/orders/{id}/track:
+    get:
+      summary: Отслеживание заказа
+      tags: [Orders]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Статус заказа
+
+  /api/v1/orders/{id}/repeat:
+    post:
+      summary: Повторить заказ
+      tags: [Orders]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Заказ повторён
+
+  /api/v1/venue/menu:
+    get:
+      summary: Получить меню заведения
+      tags: [Venue Menu]
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Меню
+    post:
+      summary: Добавить блюдо
+      tags: [Venue Menu]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MenuItem'
+      responses:
+        '201':
+          description: Блюдо добавлено
+
+  /api/v1/venue/menu/{id}:
+    put:
+      summary: Обновить блюдо
+      tags: [Venue Menu]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Блюдо обновлено
+    delete:
+      summary: Удалить блюдо
+      tags: [Venue Menu]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Блюдо удалено
+
+  /api/v1/venue/menu/{id}/availability:
+    patch:
+      summary: Изменить доступность
+      tags: [Venue Menu]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                available:
+                  type: boolean
+      responses:
+        '200':
+          description: Доступность обновлена
+
+  /api/v1/venue/orders:
+    get:
+      summary: Список заказов заведения
+      tags: [Venue Orders]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Заказы
+
+  /api/v1/venue/orders/{id}:
+    get:
+      summary: Детали заказа заведения
+      tags: [Venue Orders]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Заказ
+
+  /api/v1/venue/orders/{id}/accept:
+    patch:
+      summary: Принять заказ
+      tags: [Venue Orders]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Заказ принят
+
+  /api/v1/venue/orders/{id}/reject:
+    patch:
+      summary: Отклонить заказ
+      tags: [Venue Orders]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Заказ отклонён
+
+  /api/v1/venue/orders/{id}/status:
+    patch:
+      summary: Обновить статус заказа
+      tags: [Venue Orders]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [preparing, ready]
+      responses:
+        '200':
+          description: Статус обновлён
+
+  /api/v1/notifications/register:
+    post:
+      summary: Регистрация push-токена
+      tags: [Notifications]
+      security:
+        - UserIDHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                platform:
+                  type: string
+                  enum: [ios, android, web]
+      responses:
+        '200':
+          description: Токен зарегистрирован
+
+  /api/v1/notifications:
+    get:
+      summary: Список уведомлений
+      tags: [Notifications]
+      security:
+        - UserIDHeader: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Уведомления
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Bearer {api_key}"
+    UserIDHeader:
+      type: apiKey
+      in: header
+      name: X-User-ID
+      description: User ID (заглушка для MVP)
+
+  schemas:
+    Venue:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        logo_url:
+          type: string
+        phone:
+          type: string
+        address:
+          type: string
+        latitude:
+          type: number
+        longitude:
+          type: number
+        working_hours:
+          type: object
+        is_active:
+          type: boolean
+
+    VenueResponse:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Venue'
+
+    VenueList:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Venue'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    MenuItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        category_id:
+          type: string
+          format: uuid
+        venue_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        price:
+          type: number
+        image_url:
+          type: string
+        is_available:
+          type: boolean
+        options:
+          type: array
+
+    CreateReviewRequest:
+      type: object
+      required: [order_id, rating]
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        rating:
+          type: integer
+          minimum: 1
+          maximum: 5
+        comment:
+          type: string
+
+    AddToCartRequest:
+      type: object
+      required: [menu_item_id]
+      properties:
+        menu_item_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          default: 1
+        options:
+          type: object
+
+    CreateOrderRequest:
+      type: object
+      required: [venue_id, delivery_type]
+      properties:
+        venue_id:
+          type: string
+          format: uuid
+        delivery_type:
+          type: string
+          enum: [delivery, pickup]
+        delivery_address:
+          type: string
+        comment:
+          type: string
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        per_page:
+          type: integer
+        total:
+          type: integer
+        total_pages:
+          type: integer
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        code:
+          type: integer
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
