@@ -96,6 +96,9 @@ make docker-down  # Остановить Docker
 
 Списки отдаются постранично: `?page=&per_page=`, ответ — `{data, pagination}`.
 Все денежные суммы (`price`, `total_amount`, `amount`) — целые копейки (`int64`).
+Ошибки — `{"error", "code", "request_id"}`; 500-е скрывают детали, полные тексты в логах.
+Создание заказа идемпотентно: заголовок `Idempotency-Key`, повтор возвращает готовый заказ.
+Тела запросов ограничены 1 МБ, неизвестные JSON-поля отбиваются с 400.
 
 ### Пользовательское API
 
@@ -103,7 +106,7 @@ make docker-down  # Остановить Docker
 |-------|----------|
 | `GET /api/v1/venues` | Список заведений |
 | `GET /api/v1/venues/:id` | Детали заведения |
-| `GET /api/v1/venues/:id/menu` | Меню заведения |
+| `GET /api/v1/venues/:id/menu` | Меню заведения (search, available, пагинация) |
 | `GET /api/v1/venues/:id/reviews` | Отзывы заведения |
 | `POST /api/v1/venues/:id/reviews` | Оставить отзыв |
 | `GET /api/v1/cart?venue_id=` | Корзина |
@@ -123,7 +126,8 @@ make docker-down  # Остановить Docker
 
 | Метод | Описание |
 |-------|----------|
-| `GET /api/v1/venue/menu` | Меню заведения |
+| `GET /api/v1/venue/menu` | Меню заведения (search, available, пагинация) |
+| `GET /api/v1/venue/menu/categories` | Категории меню |
 | `POST /api/v1/venue/menu` | Добавить блюдо |
 | `PUT /api/v1/venue/menu/:id` | Обновить блюдо |
 | `DELETE /api/v1/venue/menu/:id` | Удалить блюдо |

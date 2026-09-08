@@ -98,6 +98,14 @@ paths:
           in: query
           schema:
             type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: available
+          in: query
+          schema:
+            type: boolean
       responses:
         '200':
           description: Меню
@@ -259,6 +267,12 @@ paths:
       tags: [Orders]
       security:
         - UserIDHeader: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          schema:
+            type: string
+          description: Повтор с тем же ключом вернёт уже созданный заказ
       requestBody:
         required: true
         content:
@@ -339,6 +353,25 @@ paths:
         '201':
           description: Заказ повторён
 
+  /api/v1/venue/menu/categories:
+    get:
+      summary: Категории меню заведения
+      tags: [Venue Menu]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Категории
+
   /api/v1/venue/menu:
     get:
       summary: Получить меню заведения
@@ -354,6 +387,14 @@ paths:
           in: query
           schema:
             type: integer
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: available
+          in: query
+          schema:
+            type: boolean
       responses:
         '200':
           description: Меню
@@ -687,6 +728,9 @@ components:
           type: string
         comment:
           type: string
+        payment_method:
+          type: string
+          description: card, cash или sbp; по умолчанию card
 
     Pagination:
       type: object
@@ -707,6 +751,8 @@ components:
           type: string
         code:
           type: integer
+        request_id:
+          type: string
 
   responses:
     BadRequest:
