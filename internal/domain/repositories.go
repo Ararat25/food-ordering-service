@@ -37,22 +37,23 @@ type VenueFilters struct {
 
 // MenuCategoryRepository - работа с категориями меню в БД.
 type MenuCategoryRepository interface {
-	Create(ctx context.Context, category *MenuCategory) error                // сохранить новую
-	GetByID(ctx context.Context, id string) (*MenuCategory, error)           // найти по id
-	ListByVenue(ctx context.Context, venueID string) ([]MenuCategory, error) // все категории заведения
-	Update(ctx context.Context, category *MenuCategory) error                // обновить
-	Delete(ctx context.Context, id string) error                             // удалить
+	Create(ctx context.Context, category *MenuCategory) error                                        // сохранить новую
+	GetByID(ctx context.Context, id string) (*MenuCategory, error)                                   // найти по id
+	ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]MenuCategory, int, error) // категории заведения постранично плюс общее число
+	Update(ctx context.Context, category *MenuCategory) error                                        // обновить
+	Delete(ctx context.Context, id string) error                                                     // удалить
 }
 
 // MenuItemRepository - работа с блюдами в БД.
 type MenuItemRepository interface {
-	Create(ctx context.Context, item *MenuItem) error                          // сохранить новое
-	GetByID(ctx context.Context, id string) (*MenuItem, error)                 // найти по id
-	ListByVenue(ctx context.Context, venueID string) ([]MenuItem, error)       // все блюда заведения
-	ListByCategory(ctx context.Context, categoryID string) ([]MenuItem, error) // блюда одной категории
-	Update(ctx context.Context, item *MenuItem) error                          // обновить
-	Delete(ctx context.Context, id string) error                               // удалить
-	UpdateAvailability(ctx context.Context, id string, available bool) error   // сменить наличие
+	Create(ctx context.Context, item *MenuItem) error                                                  // сохранить новое
+	GetByID(ctx context.Context, id string) (*MenuItem, error)                                         // найти по id
+	GetByIDs(ctx context.Context, ids []string) ([]MenuItem, error)                                    // найти пачку по id одним запросом
+	ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]MenuItem, int, error)       // блюда заведения постранично плюс общее число
+	ListByCategory(ctx context.Context, categoryID string, page, perPage int) ([]MenuItem, int, error) // блюда категории постранично плюс общее число
+	Update(ctx context.Context, item *MenuItem) error                                                  // обновить
+	Delete(ctx context.Context, id string) error                                                       // удалить
+	UpdateAvailability(ctx context.Context, id string, available bool) error                           // сменить наличие
 }
 
 // CartRepository - работа с корзинами в БД.

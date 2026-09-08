@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -10,7 +9,7 @@ import (
 	"avito-kitchen/internal/domain"
 )
 
-// OrderHandler - HTTP для заказов, пользовательская часть и кабинет заведения.
+// OrderHandler - обработчик для заказов, пользовательская часть и кабинет заведения.
 type OrderHandler struct {
 	orderService domain.OrderService // логика заказов
 }
@@ -51,9 +50,7 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	page, perPage = domain.NormalizePagination(page, perPage)
+	page, perPage := paginationFromQuery(r)
 
 	orders, total, err := h.orderService.ListByUser(r.Context(), userID, page, perPage)
 	if err != nil {
@@ -119,9 +116,7 @@ func (h *OrderHandler) Repeat(w http.ResponseWriter, r *http.Request) {
 func (h *OrderHandler) VenueList(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 	status := r.URL.Query().Get("status")
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	page, perPage = domain.NormalizePagination(page, perPage)
+	page, perPage := paginationFromQuery(r)
 
 	orders, total, err := h.orderService.ListByVenue(r.Context(), venueID, status, page, perPage)
 	if err != nil {

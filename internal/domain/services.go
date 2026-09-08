@@ -12,16 +12,16 @@ type VenueService interface {
 
 // MenuService - логика меню.
 type MenuService interface {
-	ListCategories(ctx context.Context, venueID string) ([]MenuCategory, error)       // категории заведения
-	CreateCategory(ctx context.Context, category *MenuCategory) error                 // создать категорию
-	UpdateCategory(ctx context.Context, category *MenuCategory) error                 // обновить категорию
-	DeleteCategory(ctx context.Context, id string) error                              // удалить категорию
-	ListItems(ctx context.Context, venueID string) ([]MenuItem, error)                // блюда заведения
-	GetItem(ctx context.Context, id string) (*MenuItem, error)                        // одно блюдо по id
-	CreateItem(ctx context.Context, item *MenuItem) error                             // создать блюдо
-	UpdateItem(ctx context.Context, item *MenuItem) error                             // обновить блюдо
-	DeleteItem(ctx context.Context, venueID, id string) error                         // удалить блюдо своего заведения
-	UpdateAvailability(ctx context.Context, venueID, id string, available bool) error // сменить наличие у своего блюда
+	ListCategories(ctx context.Context, venueID string, page, perPage int) ([]MenuCategory, int, error) // категории заведения постранично
+	CreateCategory(ctx context.Context, category *MenuCategory) error                                   // создать категорию
+	UpdateCategory(ctx context.Context, category *MenuCategory) error                                   // обновить категорию
+	DeleteCategory(ctx context.Context, id string) error                                                // удалить категорию
+	ListItems(ctx context.Context, venueID string, page, perPage int) ([]MenuItem, int, error)          // блюда заведения постранично
+	GetItem(ctx context.Context, id string) (*MenuItem, error)                                          // одно блюдо по id
+	CreateItem(ctx context.Context, item *MenuItem) error                                               // создать блюдо
+	UpdateItem(ctx context.Context, item *MenuItem) error                                               // обновить блюдо
+	DeleteItem(ctx context.Context, venueID, id string) error                                           // удалить блюдо своего заведения
+	UpdateAvailability(ctx context.Context, venueID, id string, available bool) error                   // сменить наличие у своего блюда
 }
 
 // CartService - логика корзины.

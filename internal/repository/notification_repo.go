@@ -52,7 +52,7 @@ func (r *NotificationRepo) ListByUser(ctx context.Context, userID string, page, 
 	}
 
 	offset := (page - 1) * perPage
-	query, args, err := sb.Select("*").From("notifications").
+	query, args, err := sb.Select(notificationColumns...).From("notifications").
 		Where(sq.Eq{"user_id": userID}).
 		OrderBy("created_at DESC").
 		Limit(uint64(perPage)).

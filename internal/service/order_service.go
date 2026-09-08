@@ -45,21 +45,31 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 		return nil, fmt.Errorf("%w: cart is empty", domain.ErrValidation)
 	}
 
-	var totalAmount float64
+	var totalAmount int64
 	var orderItems []domain.OrderItem
 	orderID := uuid.New().String()
 
+	// Все блюда корзины грузим одним запросом, а не по одному в цикле.
+	ids := make([]string, 0, len(cartItems))
 	for _, ci := range cartItems {
-		menuItem, err := s.itemRepo.GetByID(ctx, ci.MenuItemID)
-		if err != nil {
-			return nil, fmt.Errorf("menu item %s not found: %w", ci.MenuItemID, err)
+		ids = append(ids, ci.MenuItemID)
+	}
+	menuItems, err := s.loadMenuItems(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, ci := range cartItems {
+		menuItem, ok := menuItems[ci.MenuItemID]
+		if !ok {
+			return nil, fmt.Errorf("menu item %s not found: %w", ci.MenuItemID, domain.ErrNotFound)
 		}
 
 		if !menuItem.IsAvailable {
 			return nil, fmt.Errorf("%w: menu item %s is not available", domain.ErrValidation, menuItem.Name)
 		}
 
-		itemTotal := menuItem.Price * float64(ci.Quantity)
+		itemTotal := menuItem.Price * int64(ci.Quantity)
 		totalAmount += itemTotal
 
 		orderItem := domain.OrderItem{
@@ -176,6 +186,20 @@ func validateTransition(from, to domain.OrderStatus) error {
 	return fmt.Errorf("%w: invalid status transition from %s to %s", domain.ErrValidation, from, to)
 }
 
+// loadMenuItems - грузит блюда одним запросом и раскладывает по id.
+func (s *OrderService) loadMenuItems(ctx context.Context, ids []string) (map[string]domain.MenuItem, error) {
+	items, err := s.itemRepo.GetByIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load menu items: %w", err)
+	}
+
+	byID := make(map[string]domain.MenuItem, len(items))
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	return byID, nil
+}
+
 // GetItems - возвращает позиции заказа.
 func (s *OrderService) GetItems(ctx context.Context, orderID string) ([]domain.OrderItem, error) {
 	return s.orderRepo.GetItems(ctx, orderID)
@@ -197,13 +221,22 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 		return nil, err
 	}
 
-	var totalAmount float64
+	var totalAmount int64
 	var newItems []domain.OrderItem
 	newOrderID := uuid.New().String()
 
+	ids := make([]string, 0, len(items))
 	for _, item := range items {
-		menuItem, err := s.itemRepo.GetByID(ctx, item.MenuItemID)
-		if err != nil {
+		ids = append(ids, item.MenuItemID)
+	}
+	menuItems, err := s.loadMenuItems(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, item := range items {
+		menuItem, ok := menuItems[item.MenuItemID]
+		if !ok {
 			continue
 		}
 
@@ -211,7 +244,7 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 			continue
 		}
 
-		itemTotal := menuItem.Price * float64(item.Quantity)
+		itemTotal := menuItem.Price * int64(item.Quantity)
 		totalAmount += itemTotal
 
 		newItem := domain.OrderItem{

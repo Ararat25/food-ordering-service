@@ -39,7 +39,7 @@ type Order struct {
 	DeliveryTime          *time.Time   `json:"delivery_time" db:"delivery_time"`                     // когда доставили
 	EstimatedDeliveryTime *time.Time   `json:"estimated_delivery_time" db:"estimated_delivery_time"` // когда обещаем доставить
 	Comment               string       `json:"comment" db:"comment"`                                 // комментарий клиента
-	TotalAmount           float64      `json:"total_amount" db:"total_amount"`                       // итоговая сумма
+	TotalAmount           int64        `json:"total_amount" db:"total_amount"`                       // итоговая сумма в копейках
 	Items                 []OrderItem  `json:"items"`                                                // позиции заказа, подгружаются отдельно
 	CreatedAt             time.Time    `json:"created_at" db:"created_at"`                           // когда создан
 	UpdatedAt             time.Time    `json:"updated_at" db:"updated_at"`                           // когда обновлён
@@ -51,7 +51,7 @@ type OrderItem struct {
 	OrderID    string          `json:"order_id" db:"order_id"`         // чей заказ
 	MenuItemID string          `json:"menu_item_id" db:"menu_item_id"` // какое блюдо
 	Quantity   int             `json:"quantity" db:"quantity"`         // количество
-	Price      float64         `json:"price" db:"price"`               // цена на момент заказа
+	Price      int64           `json:"price" db:"price"`               // цена на момент заказа в копейках
 	Options    json.RawMessage `json:"options" db:"options"`           // выбранные опции в JSON
 	CreatedAt  time.Time       `json:"created_at" db:"created_at"`     // когда добавлено
 }
@@ -72,7 +72,7 @@ type Payment struct {
 	ID        string        `json:"id" db:"id"`                 // уникальный id
 	OrderID   string        `json:"order_id" db:"order_id"`     // чей заказ
 	Status    PaymentStatus `json:"status" db:"status"`         // текущий статус
-	Amount    float64       `json:"amount" db:"amount"`         // сумма
+	Amount    int64         `json:"amount" db:"amount"`         // сумма в копейках
 	Method    string        `json:"method" db:"method"`         // способ оплаты
 	CreatedAt time.Time     `json:"created_at" db:"created_at"` // когда создан
 }

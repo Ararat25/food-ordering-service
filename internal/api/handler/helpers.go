@@ -4,9 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"avito-kitchen/internal/domain"
 )
+
+// paginationFromQuery - достаёт page/per_page из query, кривые значения чинит нормализация.
+func paginationFromQuery(r *http.Request) (int, int) {
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	return domain.NormalizePagination(page, perPage)
+}
 
 // writeJSON - отдаёт ответ в JSON с нужным статусом.
 func writeJSON(w http.ResponseWriter, status int, data any) {

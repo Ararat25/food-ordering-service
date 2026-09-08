@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -22,9 +21,7 @@ func NewVenueHandler(venueService domain.VenueService) *VenueHandler {
 // List - отдаёт список заведений с поиском и пагинацией.
 func (h *VenueHandler) List(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	page, perPage = domain.NormalizePagination(page, perPage)
+	page, perPage := paginationFromQuery(r)
 
 	filters := domain.VenueFilters{
 		Search:  search,

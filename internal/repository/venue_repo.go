@@ -47,7 +47,7 @@ func (r *VenueRepo) Create(ctx context.Context, venue *domain.Venue) error {
 
 // GetByID - находит заведение по id.
 func (r *VenueRepo) GetByID(ctx context.Context, id string) (*domain.Venue, error) {
-	query, args, err := sb.Select("*").From("venues").Where(sq.Eq{"id": id}).ToSql()
+	query, args, err := sb.Select(venueColumns...).From("venues").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -70,7 +70,7 @@ func (r *VenueRepo) GetByID(ctx context.Context, id string) (*domain.Venue, erro
 
 // GetByAPIKey - находит заведение по API-ключу, нужно для auth заведений.
 func (r *VenueRepo) GetByAPIKey(ctx context.Context, apiKey string) (*domain.Venue, error) {
-	query, args, err := sb.Select("*").From("venues").Where(sq.Eq{"api_key": apiKey}).ToSql()
+	query, args, err := sb.Select(venueColumns...).From("venues").Where(sq.Eq{"api_key": apiKey}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -93,7 +93,7 @@ func (r *VenueRepo) GetByAPIKey(ctx context.Context, apiKey string) (*domain.Ven
 
 // List - возвращает активные заведения с поиском и пагинацией плюс общее число.
 func (r *VenueRepo) List(ctx context.Context, filters domain.VenueFilters) ([]domain.Venue, int, error) {
-	baseQuery := sb.Select("*").From("venues").Where(sq.Eq{"is_active": true})
+	baseQuery := sb.Select(venueColumns...).From("venues").Where(sq.Eq{"is_active": true})
 	countQuery := sb.Select("COUNT(*)").From("venues").Where(sq.Eq{"is_active": true})
 
 	if filters.Search != "" {

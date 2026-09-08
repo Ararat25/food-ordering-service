@@ -40,7 +40,7 @@ func (r *PaymentRepo) Create(ctx context.Context, p *domain.Payment) error {
 
 // GetByOrderID - находит оплату по заказу.
 func (r *PaymentRepo) GetByOrderID(ctx context.Context, orderID string) (*domain.Payment, error) {
-	query, args, err := sb.Select("*").From("payments").Where(sq.Eq{"order_id": orderID}).ToSql()
+	query, args, err := sb.Select(paymentColumns...).From("payments").Where(sq.Eq{"order_id": orderID}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}

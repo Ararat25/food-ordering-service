@@ -52,9 +52,6 @@ func (r *OrderRepo) Create(ctx context.Context, order *domain.Order) error {
 }
 
 // CreateWithItems - сохраняет заказ с позициями и платежом.
-// Если репозиторий уже привязан к транзакции через WithTx — пишет в неё,
-// иначе открывает свою. Так метод годится и для одиночных вызовов,
-// и как шаг большой транзакции на уровне сервиса.
 func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, items []domain.OrderItem) error {
 	db, ok := r.db.(*sql.DB)
 	if !ok {
@@ -123,7 +120,7 @@ func (r *OrderRepo) insertOrderWithItems(ctx context.Context, q DBTX, order *dom
 
 // GetByID - находит заказ по id.
 func (r *OrderRepo) GetByID(ctx context.Context, id string) (*domain.Order, error) {
-	query, args, err := sb.Select("*").From("orders").Where(sq.Eq{"id": id}).ToSql()
+	query, args, err := sb.Select(orderColumns...).From("orders").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -158,7 +155,7 @@ func (r *OrderRepo) ListByUser(ctx context.Context, userID string, page, perPage
 	}
 
 	offset := (page - 1) * perPage
-	query, args, err := sb.Select("*").From("orders").
+	query, args, err := sb.Select(orderColumns...).From("orders").
 		Where(sq.Eq{"user_id": userID}).
 		OrderBy("created_at DESC").
 		Limit(uint64(perPage)).
@@ -196,7 +193,7 @@ func (r *OrderRepo) ListByUser(ctx context.Context, userID string, page, perPage
 
 // ListByVenue - возвращает заказы заведения с фильтром по статусу плюс общее число.
 func (r *OrderRepo) ListByVenue(ctx context.Context, venueID string, status string, page, perPage int) ([]domain.Order, int, error) {
-	baseQuery := sb.Select("*").From("orders").Where(sq.Eq{"venue_id": venueID})
+	baseQuery := sb.Select(orderColumns...).From("orders").Where(sq.Eq{"venue_id": venueID})
 	countBaseQuery := sb.Select("COUNT(*)").From("orders").Where(sq.Eq{"venue_id": venueID})
 
 	if status != "" {
@@ -273,7 +270,7 @@ func (r *OrderRepo) UpdateStatus(ctx context.Context, id string, status domain.O
 
 // GetItems - возвращает позиции заказа.
 func (r *OrderRepo) GetItems(ctx context.Context, orderID string) ([]domain.OrderItem, error) {
-	query, args, err := sb.Select("*").From("order_items").
+	query, args, err := sb.Select(orderItemColumns...).From("order_items").
 		Where(sq.Eq{"order_id": orderID}).
 		ToSql()
 	if err != nil {

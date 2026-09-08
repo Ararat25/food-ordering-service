@@ -19,9 +19,10 @@ func NewMenuService(categoryRepo domain.MenuCategoryRepository, itemRepo domain.
 	return &MenuService{categoryRepo: categoryRepo, itemRepo: itemRepo}
 }
 
-// ListCategories - возвращает категории заведения.
-func (s *MenuService) ListCategories(ctx context.Context, venueID string) ([]domain.MenuCategory, error) {
-	return s.categoryRepo.ListByVenue(ctx, venueID)
+// ListCategories - возвращает категории заведения постранично.
+func (s *MenuService) ListCategories(ctx context.Context, venueID string, page, perPage int) ([]domain.MenuCategory, int, error) {
+	page, perPage = domain.NormalizePagination(page, perPage)
+	return s.categoryRepo.ListByVenue(ctx, venueID, page, perPage)
 }
 
 // CreateCategory - создаёт категорию, без id придумывает новый.
@@ -42,9 +43,10 @@ func (s *MenuService) DeleteCategory(ctx context.Context, id string) error {
 	return s.categoryRepo.Delete(ctx, id)
 }
 
-// ListItems - возвращает блюда заведения.
-func (s *MenuService) ListItems(ctx context.Context, venueID string) ([]domain.MenuItem, error) {
-	return s.itemRepo.ListByVenue(ctx, venueID)
+// ListItems - возвращает блюда заведения постранично.
+func (s *MenuService) ListItems(ctx context.Context, venueID string, page, perPage int) ([]domain.MenuItem, int, error) {
+	page, perPage = domain.NormalizePagination(page, perPage)
+	return s.itemRepo.ListByVenue(ctx, venueID, page, perPage)
 }
 
 // GetItem - возвращает блюдо по id.

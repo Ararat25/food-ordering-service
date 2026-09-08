@@ -21,7 +21,7 @@ type MenuItem struct {
 	VenueID     string          `json:"venue_id" db:"venue_id"`         // чьё заведение
 	Name        string          `json:"name" db:"name"`                 // название
 	Description string          `json:"description" db:"description"`   // описание
-	Price       float64         `json:"price" db:"price"`               // цена
+	Price       int64           `json:"price" db:"price"`               // цена в копейках
 	ImageURL    string          `json:"image_url" db:"image_url"`       // ссылка на фото
 	IsAvailable bool            `json:"is_available" db:"is_available"` // есть ли в наличии
 	Options     json.RawMessage `json:"options" db:"options"`           // опции блюда в JSON

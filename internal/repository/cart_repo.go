@@ -33,7 +33,7 @@ func (r *CartRepo) WithTx(tx *sql.Tx) domain.CartRepository {
 func (r *CartRepo) GetOrCreate(ctx context.Context, userID, venueID string) (*domain.Cart, error) {
 	var cart domain.Cart
 
-	query, args, err := sb.Select("*").From("carts").
+	query, args, err := sb.Select(cartColumns...).From("carts").
 		Where(sq.Eq{"user_id": userID, "venue_id": venueID}).
 		ToSql()
 	if err != nil {
@@ -72,7 +72,7 @@ func (r *CartRepo) GetOrCreate(ctx context.Context, userID, venueID string) (*do
 
 // GetByID - находит корзину по id.
 func (r *CartRepo) GetByID(ctx context.Context, id string) (*domain.Cart, error) {
-	query, args, err := sb.Select("*").From("carts").Where(sq.Eq{"id": id}).ToSql()
+	query, args, err := sb.Select(cartColumns...).From("carts").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -169,7 +169,7 @@ func (r *CartRepo) RemoveItem(ctx context.Context, itemID string) error {
 
 // GetItems - возвращает все позиции корзины по дате добавления.
 func (r *CartRepo) GetItems(ctx context.Context, cartID string) ([]domain.CartItem, error) {
-	query, args, err := sb.Select("*").From("cart_items").
+	query, args, err := sb.Select(cartItemColumns...).From("cart_items").
 		Where(sq.Eq{"cart_id": cartID}).
 		OrderBy("created_at ASC").
 		ToSql()

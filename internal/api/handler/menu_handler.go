@@ -19,30 +19,32 @@ func NewMenuHandler(menuService domain.MenuService) *MenuHandler {
 	return &MenuHandler{menuService: menuService}
 }
 
-// ListItems - отдаёт блюда заведения из контекста, для кабинета.
+// ListItems - отдаёт блюда заведения из контекста постранично, для кабинета.
 func (h *MenuHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
+	page, perPage := paginationFromQuery(r)
 
-	items, err := h.menuService.ListItems(r.Context(), venueID)
+	items, total, err := h.menuService.ListItems(r.Context(), venueID, page, perPage)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writePaginated(w, items, page, perPage, total)
 }
 
-// ListByVenuePublic - отдаёт блюда заведения по id из пути, для всех.
+// ListByVenuePublic - отдаёт блюда заведения по id из пути постранично, для всех.
 func (h *MenuHandler) ListByVenuePublic(w http.ResponseWriter, r *http.Request) {
 	venueID := chi.URLParam(r, "id")
+	page, perPage := paginationFromQuery(r)
 
-	items, err := h.menuService.ListItems(r.Context(), venueID)
+	items, total, err := h.menuService.ListItems(r.Context(), venueID, page, perPage)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writePaginated(w, items, page, perPage, total)
 }
 
 // CreateItem - создаёт блюдо в своём заведении.
@@ -121,17 +123,18 @@ func (h *MenuHandler) UpdateAvailability(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, map[string]any{"message": "availability updated"})
 }
 
-// ListCategories - отдаёт категории своего заведения.
+// ListCategories - отдаёт категории своего заведения постранично.
 func (h *MenuHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
+	page, perPage := paginationFromQuery(r)
 
-	categories, err := h.menuService.ListCategories(r.Context(), venueID)
+	categories, total, err := h.menuService.ListCategories(r.Context(), venueID, page, perPage)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"data": categories})
+	writePaginated(w, categories, page, perPage, total)
 }
 
 // CreateCategory - создаёт категорию в своём заведении.

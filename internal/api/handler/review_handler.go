@@ -2,7 +2,6 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -31,7 +30,7 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		OrderID string `json:"order_id"` // по какому заказу отзыв
-		Rating  int    `json:"rating"`   // оценка от 1 до 5
+		Rating  int    `json:"rating"`   // оценка
 		Comment string `json:"comment"`  // текст отзыва
 	}
 	if err := decodeJSON(r, &req); err != nil {
@@ -54,9 +53,7 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 // ListByVenue - отдаёт отзывы заведения постранично.
 func (h *ReviewHandler) ListByVenue(w http.ResponseWriter, r *http.Request) {
 	venueID := chi.URLParam(r, "id")
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	page, perPage = domain.NormalizePagination(page, perPage)
+	page, perPage := paginationFromQuery(r)
 
 	reviews, total, err := h.reviewService.ListByVenue(r.Context(), venueID, page, perPage)
 	if err != nil {

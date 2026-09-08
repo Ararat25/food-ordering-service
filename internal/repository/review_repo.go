@@ -56,7 +56,7 @@ func (r *ReviewRepo) ListByVenue(ctx context.Context, venueID string, page, perP
 	}
 
 	offset := (page - 1) * perPage
-	query, args, err := sb.Select("*").From("reviews").
+	query, args, err := sb.Select(reviewColumns...).From("reviews").
 		Where(sq.Eq{"venue_id": venueID}).
 		OrderBy("created_at DESC").
 		Limit(uint64(perPage)).
@@ -90,7 +90,7 @@ func (r *ReviewRepo) ListByVenue(ctx context.Context, venueID string, page, perP
 
 // GetByUserAndOrder - находит отзыв пользователя по заказу, нет такого — ErrNotFound.
 func (r *ReviewRepo) GetByUserAndOrder(ctx context.Context, userID, orderID string) (*domain.Review, error) {
-	query, args, err := sb.Select("*").From("reviews").
+	query, args, err := sb.Select(reviewColumns...).From("reviews").
 		Where(sq.Eq{"user_id": userID, "order_id": orderID}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)

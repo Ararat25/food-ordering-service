@@ -41,7 +41,7 @@ func (r *PushTokenRepo) Register(ctx context.Context, t *domain.PushToken) error
 
 // GetByUserID - возвращает все токены пользователя.
 func (r *PushTokenRepo) GetByUserID(ctx context.Context, userID string) ([]domain.PushToken, error) {
-	query, args, err := sb.Select("*").From("push_tokens").
+	query, args, err := sb.Select(pushTokenColumns...).From("push_tokens").
 		Where(sq.Eq{"user_id": userID}).
 		ToSql()
 	if err != nil {

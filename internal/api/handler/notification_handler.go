@@ -2,12 +2,11 @@ package handler
 
 import (
 	"net/http"
-	"strconv"
 
 	"avito-kitchen/internal/domain"
 )
 
-// NotificationHandler - HTTP для уведомлений.
+// NotificationHandler - обработчик для уведомлений.
 type NotificationHandler struct {
 	notifService domain.NotificationService // логика уведомлений
 }
@@ -27,7 +26,7 @@ func (h *NotificationHandler) RegisterToken(w http.ResponseWriter, r *http.Reque
 
 	var req struct {
 		Token    string `json:"token"`    // сам токен
-		Platform string `json:"platform"` // платформа, например ios
+		Platform string `json:"platform"` // платформа
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -59,9 +58,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	page, perPage = domain.NormalizePagination(page, perPage)
+	page, perPage := paginationFromQuery(r)
 
 	notifications, total, err := h.notifService.ListByUser(r.Context(), userID, page, perPage)
 	if err != nil {

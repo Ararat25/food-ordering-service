@@ -90,6 +90,14 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
       responses:
         '200':
           description: Меню
@@ -102,6 +110,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/MenuItem'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
 
   /api/v1/venues/{id}/reviews:
     get:
@@ -335,6 +345,15 @@ paths:
       tags: [Venue Menu]
       security:
         - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
       responses:
         '200':
           description: Меню
@@ -618,7 +637,8 @@ components:
         description:
           type: string
         price:
-          type: number
+          type: integer
+          description: Цена в копейках
         image_url:
           type: string
         is_available:

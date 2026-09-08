@@ -44,7 +44,7 @@ func (r *MenuCategoryRepo) Create(ctx context.Context, cat *domain.MenuCategory)
 
 // GetByID - находит категорию по id.
 func (r *MenuCategoryRepo) GetByID(ctx context.Context, id string) (*domain.MenuCategory, error) {
-	query, args, err := sb.Select("*").From("menu_categories").Where(sq.Eq{"id": id}).ToSql()
+	query, args, err := sb.Select(menuCategoryColumns...).From("menu_categories").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -63,19 +63,33 @@ func (r *MenuCategoryRepo) GetByID(ctx context.Context, id string) (*domain.Menu
 	return &cat, nil
 }
 
-// ListByVenue - возвращает категории заведения по порядку показа.
-func (r *MenuCategoryRepo) ListByVenue(ctx context.Context, venueID string) ([]domain.MenuCategory, error) {
-	query, args, err := sb.Select("*").From("menu_categories").
+// ListByVenue - возвращает категории заведения по порядку показа плюс общее число.
+func (r *MenuCategoryRepo) ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]domain.MenuCategory, int, error) {
+	countQuery, countArgs, err := sb.Select("COUNT(*)").From("menu_categories").
+		Where(sq.Eq{"venue_id": venueID}).ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build count query: %w", err)
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count categories: %w", err)
+	}
+
+	offset := (page - 1) * perPage
+	query, args, err := sb.Select(menuCategoryColumns...).From("menu_categories").
 		Where(sq.Eq{"venue_id": venueID}).
 		OrderBy("sort_order ASC").
+		Limit(uint64(perPage)).
+		Offset(uint64(offset)).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build query: %w", err)
+		return nil, 0, fmt.Errorf("build query: %w", err)
 	}
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list categories: %w", err)
+		return nil, 0, fmt.Errorf("list categories: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -83,16 +97,16 @@ func (r *MenuCategoryRepo) ListByVenue(ctx context.Context, venueID string) ([]d
 	for rows.Next() {
 		var cat domain.MenuCategory
 		if err := rows.Scan(&cat.ID, &cat.VenueID, &cat.Name, &cat.SortOrder, &cat.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan category: %w", err)
+			return nil, 0, fmt.Errorf("scan category: %w", err)
 		}
 		categories = append(categories, cat)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate categories: %w", err)
+		return nil, 0, fmt.Errorf("iterate categories: %w", err)
 	}
 
-	return categories, nil
+	return categories, total, nil
 }
 
 // Update - обновляет категорию, чужой id даёт ErrNotFound.
@@ -169,7 +183,7 @@ func (r *MenuItemRepo) Create(ctx context.Context, item *domain.MenuItem) error 
 
 // GetByID - находит блюдо по id.
 func (r *MenuItemRepo) GetByID(ctx context.Context, id string) (*domain.MenuItem, error) {
-	query, args, err := sb.Select("*").From("menu_items").Where(sq.Eq{"id": id}).ToSql()
+	query, args, err := sb.Select(menuItemColumns...).From("menu_items").Where(sq.Eq{"id": id}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -190,11 +204,14 @@ func (r *MenuItemRepo) GetByID(ctx context.Context, id string) (*domain.MenuItem
 	return &item, nil
 }
 
-// ListByVenue - возвращает блюда заведения по алфавиту.
-func (r *MenuItemRepo) ListByVenue(ctx context.Context, venueID string) ([]domain.MenuItem, error) {
-	query, args, err := sb.Select("*").From("menu_items").
-		Where(sq.Eq{"venue_id": venueID}).
-		OrderBy("name ASC").
+// GetByIDs - находит пачку блюд по id одним запросом, для сборки заказа без N+1.
+func (r *MenuItemRepo) GetByIDs(ctx context.Context, ids []string) ([]domain.MenuItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	query, args, err := sb.Select(menuItemColumns...).From("menu_items").
+		Where(sq.Eq{"id": ids}).
 		ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
@@ -202,7 +219,7 @@ func (r *MenuItemRepo) ListByVenue(ctx context.Context, venueID string) ([]domai
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list menu items: %w", err)
+		return nil, fmt.Errorf("list menu items by ids: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -220,25 +237,39 @@ func (r *MenuItemRepo) ListByVenue(ctx context.Context, venueID string) ([]domai
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate menu items: %w", err)
+		return nil, fmt.Errorf("iterate menu items by ids: %w", err)
 	}
 
 	return items, nil
 }
 
-// ListByCategory - возвращает блюда одной категории по алфавиту.
-func (r *MenuItemRepo) ListByCategory(ctx context.Context, categoryID string) ([]domain.MenuItem, error) {
-	query, args, err := sb.Select("*").From("menu_items").
-		Where(sq.Eq{"category_id": categoryID}).
+// ListByVenue - возвращает блюда заведения по алфавиту плюс общее число.
+func (r *MenuItemRepo) ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]domain.MenuItem, int, error) {
+	countQuery, countArgs, err := sb.Select("COUNT(*)").From("menu_items").
+		Where(sq.Eq{"venue_id": venueID}).ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build count query: %w", err)
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count menu items: %w", err)
+	}
+
+	offset := (page - 1) * perPage
+	query, args, err := sb.Select(menuItemColumns...).From("menu_items").
+		Where(sq.Eq{"venue_id": venueID}).
 		OrderBy("name ASC").
+		Limit(uint64(perPage)).
+		Offset(uint64(offset)).
 		ToSql()
 	if err != nil {
-		return nil, fmt.Errorf("build query: %w", err)
+		return nil, 0, fmt.Errorf("build query: %w", err)
 	}
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list menu items by category: %w", err)
+		return nil, 0, fmt.Errorf("list menu items: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -250,16 +281,66 @@ func (r *MenuItemRepo) ListByCategory(ctx context.Context, categoryID string) ([
 			&item.Price, &item.ImageURL, &item.IsAvailable, &item.Options,
 			&item.CreatedAt, &item.UpdatedAt,
 		); err != nil {
-			return nil, fmt.Errorf("scan menu item: %w", err)
+			return nil, 0, fmt.Errorf("scan menu item: %w", err)
 		}
 		items = append(items, item)
 	}
 
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate menu items by category: %w", err)
+		return nil, 0, fmt.Errorf("iterate menu items: %w", err)
 	}
 
-	return items, nil
+	return items, total, nil
+}
+
+// ListByCategory - возвращает блюда одной категории по алфавиту плюс общее число.
+func (r *MenuItemRepo) ListByCategory(ctx context.Context, categoryID string, page, perPage int) ([]domain.MenuItem, int, error) {
+	countQuery, countArgs, err := sb.Select("COUNT(*)").From("menu_items").
+		Where(sq.Eq{"category_id": categoryID}).ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build count query: %w", err)
+	}
+
+	var total int
+	if err := r.db.QueryRowContext(ctx, countQuery, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count menu items by category: %w", err)
+	}
+
+	offset := (page - 1) * perPage
+	query, args, err := sb.Select(menuItemColumns...).From("menu_items").
+		Where(sq.Eq{"category_id": categoryID}).
+		OrderBy("name ASC").
+		Limit(uint64(perPage)).
+		Offset(uint64(offset)).
+		ToSql()
+	if err != nil {
+		return nil, 0, fmt.Errorf("build query: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list menu items by category: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var items []domain.MenuItem
+	for rows.Next() {
+		var item domain.MenuItem
+		if err := rows.Scan(
+			&item.ID, &item.CategoryID, &item.VenueID, &item.Name, &item.Description,
+			&item.Price, &item.ImageURL, &item.IsAvailable, &item.Options,
+			&item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan menu item: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate menu items by category: %w", err)
+	}
+
+	return items, total, nil
 }
 
 // Update - обновляет блюдо, чужой id даёт ErrNotFound.
