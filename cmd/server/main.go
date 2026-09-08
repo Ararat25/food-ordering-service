@@ -16,7 +16,7 @@ import (
 	"avito-kitchen/internal/db"
 )
 
-// parseLogLevel - переводит строку уровня в slog.Level, непонятное даёт info.
+// parseLogLevel - переводит строку уровня в slog.Level
 func parseLogLevel(s string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "debug":
@@ -46,7 +46,11 @@ func main() {
 		logger.Error("failed to connect to database", "error", err)
 		os.Exit(1)
 	}
-	defer func() { _ = database.Close() }()
+	defer func() {
+		if err := database.Close(); err != nil {
+			logger.Error("failed to close database", "error", err)
+		}
+	}()
 
 	r := router.New(database, logger)
 
