@@ -1,0 +1,14 @@
+-- +goose Up
+-- Деньги переводим из рублей (DECIMAL) в копейки (BIGINT, minor units):
+-- дробная арифметика копит ошибки округления, целые копейки точны всегда.
+-- Сид 0006 и старые данные лежат в рублях, поэтому при смене типа умножаем на 100.
+ALTER TABLE menu_items ALTER COLUMN price TYPE BIGINT USING (price * 100)::BIGINT;
+ALTER TABLE orders ALTER COLUMN total_amount TYPE BIGINT USING (total_amount * 100)::BIGINT;
+ALTER TABLE order_items ALTER COLUMN price TYPE BIGINT USING (price * 100)::BIGINT;
+ALTER TABLE payments ALTER COLUMN amount TYPE BIGINT USING (amount * 100)::BIGINT;
+
+-- +goose Down
+ALTER TABLE payments ALTER COLUMN amount TYPE DECIMAL(10, 2) USING (amount / 100.0)::DECIMAL(10, 2);
+ALTER TABLE order_items ALTER COLUMN price TYPE DECIMAL(10, 2) USING (price / 100.0)::DECIMAL(10, 2);
+ALTER TABLE orders ALTER COLUMN total_amount TYPE DECIMAL(10, 2) USING (total_amount / 100.0)::DECIMAL(10, 2);
+ALTER TABLE menu_items ALTER COLUMN price TYPE DECIMAL(10, 2) USING (price / 100.0)::DECIMAL(10, 2);
