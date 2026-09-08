@@ -4,8 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"avito-kitchen/internal/domain"
 )
 
@@ -28,9 +26,8 @@ func (h *CartHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	venueID := r.URL.Query().Get("venue_id")
-	if venueID == "" {
-		writeError(w, r, http.StatusBadRequest, "venue_id query parameter required")
+	venueID, ok := venueIDFromQuery(w, r)
+	if !ok {
 		return
 	}
 
@@ -51,15 +48,18 @@ func (h *CartHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	venueID := r.URL.Query().Get("venue_id")
-	if venueID == "" {
-		writeError(w, r, http.StatusBadRequest, "venue_id query parameter required")
+	venueID, ok := venueIDFromQuery(w, r)
+	if !ok {
 		return
 	}
 
 	var req domain.AddToCartRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeDecodeError(w, r, err)
+		return
+	}
+
+	if !checkUUID(w, r, "menu_item_id", req.MenuItemID) {
 		return
 	}
 
@@ -84,7 +84,10 @@ func (h *CartHandler) UpdateItemQuantity(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	itemID := chi.URLParam(r, "id")
+	itemID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 
 	var req struct {
 		Quantity int `json:"quantity"` // новое количество
@@ -115,7 +118,10 @@ func (h *CartHandler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	itemID := chi.URLParam(r, "id")
+	itemID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 
 	if err := h.cartService.RemoveItem(r.Context(), userID, itemID); err != nil {
 		writeServiceError(w, r, h.logger, err)
@@ -133,9 +139,8 @@ func (h *CartHandler) Clear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	venueID := r.URL.Query().Get("venue_id")
-	if venueID == "" {
-		writeError(w, r, http.StatusBadRequest, "venue_id query parameter required")
+	venueID, ok := venueIDFromQuery(w, r)
+	if !ok {
 		return
 	}
 

@@ -8,7 +8,7 @@ import (
 	"avito-kitchen/internal/domain"
 )
 
-// UserRepo checks whether a demo user identity exists before the API reaches FK-backed writes.
+// UserRepo проверяет, существует ли демонстрационный идентификатор пользователя, прежде чем API перейдет к записям с поддержкой FK.
 type UserRepo struct {
 	db *sql.DB
 }

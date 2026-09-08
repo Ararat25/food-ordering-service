@@ -25,6 +25,14 @@ var (
 	_ domain.CartService  = (*stubCartService)(nil)
 )
 
+// Тестовые id обязаны быть настоящими UUID: хендлеры проверяют их на границе API.
+const (
+	testVenueID  = "3f6c0f34-0000-4000-8000-000000000001"
+	testOrderID  = "3f6c0f34-0000-4000-8000-000000000002"
+	testItemID   = "3f6c0f34-0000-4000-8000-000000000003"
+	brokenItemID = "nope"
+)
+
 type stubOrderService struct {
 	order   *domain.Order
 	err     error
@@ -171,7 +179,7 @@ func withRequestID(r *http.Request) *http.Request {
 }
 
 func TestOrderCreateHandler(t *testing.T) {
-	body := `{"venue_id":"v-1","delivery_type":"delivery"}`
+	body := `{"venue_id":"` + testVenueID + `","delivery_type":"delivery"}`
 
 	t.Run("успех и ключ идемпотентности доходит до сервиса", func(t *testing.T) {
 		svc := &stubOrderService{order: &domain.Order{ID: "o-1"}}
@@ -213,13 +221,26 @@ func TestOrderCreateHandler(t *testing.T) {
 
 	t.Run("лишнее поле 400", func(t *testing.T) {
 		h := NewOrderHandler(&stubOrderService{}, testLogger())
-		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/orders", strings.NewReader(`{"venue_id":"v-1","nonsense":1}`))
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/orders", strings.NewReader(`{"venue_id":"`+testVenueID+`","nonsense":1}`))
 		r.Header.Set("X-User-ID", "u-1")
 		w := httptest.NewRecorder()
 
 		h.Create(w, withRequestID(r))
 
 		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("битый venue_id 400", func(t *testing.T) {
+		h := NewOrderHandler(&stubOrderService{}, testLogger())
+
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/orders", strings.NewReader(`{"venue_id":"v-1","delivery_type":"delivery"}`))
+		r.Header.Set("X-User-ID", "u-1")
+		w := httptest.NewRecorder()
+
+		h.Create(w, withRequestID(r))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.Contains(t, w.Body.String(), "venue_id must be a UUID")
 	})
 
 	t.Run("ошибка валидации 400 с текстом", func(t *testing.T) {
@@ -261,14 +282,14 @@ func TestMenuListHandler(t *testing.T) {
 		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/venue/menu?page=2&per_page=1", nil)
 		r = withRequestID(r)
 		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "v-1")
+		rctx.URLParams.Add("id", testVenueID)
 		r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
 		w := httptest.NewRecorder()
 
 		h.ListByVenuePublic(w, r)
 
 		require.Equal(t, http.StatusOK, w.Code)
-		require.Equal(t, "v-1", svc.got.VenueID)
+		require.Equal(t, testVenueID, svc.got.VenueID)
 		require.Equal(t, 2, svc.got.Page)
 		require.Equal(t, 1, svc.got.PerPage)
 		require.Contains(t, w.Body.String(), `"total":5`)
@@ -278,9 +299,9 @@ func TestMenuListHandler(t *testing.T) {
 		svc := &stubMenuService{}
 		h := NewMenuHandler(svc, testLogger())
 
-		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/venues/v-1/menu?search=кола&available=true", nil)
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/venues/"+testVenueID+"/menu?search=кола&available=true", nil)
 		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "v-1")
+		rctx.URLParams.Add("id", testVenueID)
 		r = r.WithContext(context.WithValue(withRequestID(r).Context(), chi.RouteCtxKey, rctx))
 		w := httptest.NewRecorder()
 
@@ -311,9 +332,9 @@ func TestVenueGetHandler(t *testing.T) {
 		svc := &stubVenueService{err: domain.ErrNotFound}
 		h := NewVenueHandler(svc, testLogger())
 
-		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/venues/nope", nil)
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/venues/"+testVenueID, nil)
 		rctx := chi.NewRouteContext()
-		rctx.URLParams.Add("id", "nope")
+		rctx.URLParams.Add("id", testVenueID)
 		r = r.WithContext(context.WithValue(withRequestID(r).Context(), chi.RouteCtxKey, rctx))
 		w := httptest.NewRecorder()
 
@@ -321,18 +342,58 @@ func TestVenueGetHandler(t *testing.T) {
 
 		require.Equal(t, http.StatusNotFound, w.Code)
 	})
+
+	t.Run("кривой id в пути 400", func(t *testing.T) {
+		svc := &stubVenueService{venue: &domain.Venue{ID: testVenueID}}
+		h := NewVenueHandler(svc, testLogger())
+
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/api/v1/venues/"+brokenItemID, nil)
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", brokenItemID)
+		r = r.WithContext(context.WithValue(withRequestID(r).Context(), chi.RouteCtxKey, rctx))
+		w := httptest.NewRecorder()
+
+		h.GetByID(w, r)
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.Contains(t, w.Body.String(), "id must be a UUID")
+	})
 }
 
 func TestCartAddHandler(t *testing.T) {
 	t.Run("без venue_id 400", func(t *testing.T) {
 		h := NewCartHandler(&stubCartService{}, testLogger())
-		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/cart/items", strings.NewReader(`{"menu_item_id":"i-1"}`))
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/cart/items", strings.NewReader(`{"menu_item_id":"`+testItemID+`"}`))
 		r.Header.Set("X-User-ID", "u-1")
 		w := httptest.NewRecorder()
 
 		h.AddItem(w, withRequestID(r))
 
 		require.Equal(t, http.StatusBadRequest, w.Code)
+	})
+
+	t.Run("кривой venue_id в query 400", func(t *testing.T) {
+		h := NewCartHandler(&stubCartService{}, testLogger())
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/cart/items?venue_id=v-1", strings.NewReader(`{"menu_item_id":"`+testItemID+`"}`))
+		r.Header.Set("X-User-ID", "u-1")
+		w := httptest.NewRecorder()
+
+		h.AddItem(w, withRequestID(r))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.Contains(t, w.Body.String(), "venue_id must be a UUID")
+	})
+
+	t.Run("кривой menu_item_id в теле 400", func(t *testing.T) {
+		h := NewCartHandler(&stubCartService{}, testLogger())
+		r := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/cart/items?venue_id="+testVenueID, strings.NewReader(`{"menu_item_id":"`+brokenItemID+`"}`))
+		r.Header.Set("X-User-ID", "u-1")
+		w := httptest.NewRecorder()
+
+		h.AddItem(w, withRequestID(r))
+
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.Contains(t, w.Body.String(), "menu_item_id must be a UUID")
 	})
 }
 

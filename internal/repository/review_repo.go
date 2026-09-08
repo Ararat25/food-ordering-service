@@ -26,12 +26,13 @@ func (r *ReviewRepo) Create(ctx context.Context, review *domain.Review) error {
 	query, args, err := sb.Insert("reviews").
 		Columns("id", "user_id", "venue_id", "order_id", "rating", "comment").
 		Values(review.ID, review.UserID, review.VenueID, review.OrderID, review.Rating, review.Comment).
+		Suffix("RETURNING created_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, query, args...)
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(&review.CreatedAt)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
 			return domain.ErrAlreadyExists

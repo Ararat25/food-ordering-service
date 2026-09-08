@@ -43,7 +43,7 @@ func validRequestID(id string) bool {
 	return true
 }
 
-// WriteError writes the shared API error envelope for middleware failures.
+// WriteError формирует общий конверт ошибок API для сбоев middleware.
 func WriteError(w http.ResponseWriter, r *http.Request, status int, message string) {
 	body := map[string]any{"error": message, "code": status}
 	if requestID, ok := r.Context().Value(RequestIDKey).(string); ok {

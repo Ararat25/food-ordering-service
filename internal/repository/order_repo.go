@@ -92,25 +92,28 @@ func (r *OrderRepo) insertOrderWithItems(ctx context.Context, q DBTX, order *dom
 		Values(order.ID, order.UserID, order.VenueID, order.Status, order.DeliveryType,
 			order.DeliveryAddress, order.DeliveryTime, order.EstimatedDeliveryTime,
 			order.Comment, order.TotalAmount, idempotencyValue(order.IdempotencyKey)).
+		Suffix("RETURNING created_at, updated_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build order query: %w", err)
 	}
 
-	if _, err := q.ExecContext(ctx, orderQuery, orderArgs...); err != nil {
+	if err := q.QueryRowContext(ctx, orderQuery, orderArgs...).Scan(&order.CreatedAt, &order.UpdatedAt); err != nil {
 		return fmt.Errorf("insert order: %w", err)
 	}
 
-	for _, item := range items {
+	for i := range items {
+		item := &items[i]
 		itemQuery, itemArgs, err := sb.Insert("order_items").
 			Columns("id", "order_id", "menu_item_id", "quantity", "price", "options").
 			Values(item.ID, item.OrderID, item.MenuItemID, item.Quantity, item.Price, item.Options).
+			Suffix("RETURNING created_at").
 			ToSql()
 		if err != nil {
 			return fmt.Errorf("build item query: %w", err)
 		}
 
-		if _, err := q.ExecContext(ctx, itemQuery, itemArgs...); err != nil {
+		if err := q.QueryRowContext(ctx, itemQuery, itemArgs...).Scan(&item.CreatedAt); err != nil {
 			return fmt.Errorf("insert order item: %w", err)
 		}
 	}

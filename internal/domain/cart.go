@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// MaxCartItemQuantity bounds per-line quantities and keeps request/DB limits consistent.
+// MaxCartItemQuantity ограничивает количество данных в строке и обеспечивает согласованность запросов и базы данных.
 const MaxCartItemQuantity = 1000
 
 // Cart - корзина пользователя в одном заведении.

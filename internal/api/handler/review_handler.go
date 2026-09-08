@@ -4,8 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"avito-kitchen/internal/domain"
 )
 
@@ -28,7 +26,10 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	venueID := chi.URLParam(r, "id")
+	venueID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 
 	var req struct {
 		OrderID string `json:"order_id"` // по какому заказу отзыв
@@ -37,6 +38,10 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
 		writeDecodeError(w, r, err)
+		return
+	}
+
+	if !checkUUID(w, r, "order_id", req.OrderID) {
 		return
 	}
 
@@ -54,7 +59,10 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 // ListByVenue - отдаёт отзывы заведения постранично.
 func (h *ReviewHandler) ListByVenue(w http.ResponseWriter, r *http.Request) {
-	venueID := chi.URLParam(r, "id")
+	venueID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	page, perPage, err := paginationFromQuery(r)
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, err.Error())

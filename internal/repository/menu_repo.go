@@ -27,12 +27,13 @@ func (r *MenuCategoryRepo) Create(ctx context.Context, cat *domain.MenuCategory)
 	query, args, err := sb.Insert("menu_categories").
 		Columns("id", "venue_id", "name", "sort_order").
 		Values(cat.ID, cat.VenueID, cat.Name, cat.SortOrder).
+		Suffix("RETURNING created_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, query, args...)
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(&cat.CreatedAt)
 	if err != nil {
 		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
 			return domain.ErrAlreadyExists
@@ -199,12 +200,13 @@ func (r *MenuItemRepo) Create(ctx context.Context, item *domain.MenuItem) error 
 	query, args, err := sb.Insert("menu_items").
 		Columns("id", "category_id", "venue_id", "name", "description", "price", "image_url", "is_available", "options").
 		Values(item.ID, item.CategoryID, item.VenueID, item.Name, item.Description, item.Price, item.ImageURL, item.IsAvailable, item.Options).
+		Suffix("RETURNING created_at, updated_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, query, args...)
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(&item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		return fmt.Errorf("insert menu item: %w", err)
 	}
@@ -443,19 +445,18 @@ func (r *MenuItemRepo) Update(ctx context.Context, item *domain.MenuItem) error 
 		Set("options", item.Options).
 		Set("updated_at", sq.Expr("NOW()")).
 		Where(sq.Eq{"id": item.ID}).
+		Suffix("RETURNING created_at, updated_at").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	result, err := r.db.ExecContext(ctx, query, args...)
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(&item.CreatedAt, &item.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return domain.ErrNotFound
+	}
 	if err != nil {
 		return fmt.Errorf("update menu item: %w", err)
-	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return domain.ErrNotFound
 	}
 
 	return nil

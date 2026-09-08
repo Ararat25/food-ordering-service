@@ -7,8 +7,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// LoadDotEnv loads a local .env file when present. Existing process environment
-// variables take precedence, and a missing file is normal in containers/production.
+// LoadDotEnv загружает локальный файл .env, если он присутствует.
 func LoadDotEnv() error {
 	err := godotenv.Load()
 	if errors.Is(err, fs.ErrNotExist) {

@@ -77,6 +77,8 @@ paths:
             type: string
             format: uuid
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '200':
           description: Заведение
           content:
@@ -266,6 +268,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -294,6 +297,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -534,6 +538,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -553,6 +558,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -574,6 +580,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         required: true
         content:
@@ -633,6 +640,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -654,6 +662,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -675,6 +684,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       responses:
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -696,6 +706,7 @@ paths:
           required: true
           schema:
             type: string
+            format: uuid
       requestBody:
         required: true
         content:

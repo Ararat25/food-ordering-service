@@ -9,11 +9,44 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"avito-kitchen/internal/api/middleware"
 	"avito-kitchen/internal/domain"
 )
 
-// paginationFromQuery - defaults omitted values and rejects malformed/out-of-range values.
+// checkUUID - проверяет значение на UUID, кривое отвечает 400 и возвращает false.
+func checkUUID(w http.ResponseWriter, r *http.Request, name, value string) bool {
+	if _, err := uuid.Parse(value); err != nil {
+		writeError(w, r, http.StatusBadRequest, name+" must be a UUID")
+		return false
+	}
+	return true
+}
+
+// checkOptionalUUID - то же, но пустое значение пропускает, оно уходит на обязательную проверку в сервис.
+func checkOptionalUUID(w http.ResponseWriter, r *http.Request, name, value string) bool {
+	return value == "" || checkUUID(w, r, name, value)
+}
+
+// idFromPath - достаёт id из пути и проверяет его на UUID.
+func idFromPath(w http.ResponseWriter, r *http.Request) (string, bool) {
+	id := chi.URLParam(r, "id")
+	return id, checkUUID(w, r, "id", id)
+}
+
+// venueIDFromQuery - достаёт обязательный venue_id из query и проверяет его на UUID.
+func venueIDFromQuery(w http.ResponseWriter, r *http.Request) (string, bool) {
+	venueID := r.URL.Query().Get("venue_id")
+	if venueID == "" {
+		writeError(w, r, http.StatusBadRequest, "venue_id query parameter required")
+		return "", false
+	}
+	return venueID, checkUUID(w, r, "venue_id", venueID)
+}
+
+// paginationFromQuery - по умолчанию используются пропущенные значения и отклоняются искаженные/выходящие за пределы диапазона значения.
 func paginationFromQuery(r *http.Request) (int, int, error) {
 	page, perPage := domain.DefaultPage, domain.DefaultPerPage
 	if raw := r.URL.Query().Get("page"); raw != "" {

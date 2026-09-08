@@ -4,8 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"avito-kitchen/internal/domain"
 )
 
@@ -46,7 +44,10 @@ func (h *VenueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // GetByID - отдаёт одно заведение по id из пути.
 func (h *VenueHandler) GetByID(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+	id, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 
 	venue, err := h.venueService.GetByID(r.Context(), id)
 	if err != nil {

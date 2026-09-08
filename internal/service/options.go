@@ -61,9 +61,9 @@ func parseMenuOptions(raw json.RawMessage) ([]menuOption, error) {
 	return definitions, nil
 }
 
-// validateOptionSelection accepts a map {optionName: selectedValue}, fills declared defaults,
-// and returns a canonical JSON object. Option choices are descriptive only in this MVP; they do
-// not alter the base menu price.
+// validateOptionSelection принимает map {optionName: selectedValue}, заполняет объявленные значения по умолчанию
+// и возвращает канонический объект JSON. Выбор опций в этом MVP носит только описательный характер; они
+// не изменяют стоимость базового меню.
 func validateOptionSelection(definitionsRaw, selectedRaw json.RawMessage) (json.RawMessage, error) {
 	definitions, err := parseMenuOptions(definitionsRaw)
 	if err != nil {
@@ -106,7 +106,7 @@ func validateOptionSelection(definitionsRaw, selectedRaw json.RawMessage) (json.
 	return canonical, nil
 }
 
-// sameOptions compares JSON values independent of object key order and whitespace.
+// sameOptions сравнивает значения JSON независимо от порядка ключей объекта и пробелов.
 func sameOptions(a, b json.RawMessage) bool {
 	a, b = normalizeOptions(a), normalizeOptions(b)
 	if bytes.Equal(a, b) {

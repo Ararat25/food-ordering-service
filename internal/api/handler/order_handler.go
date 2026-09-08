@@ -4,8 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"avito-kitchen/internal/api/middleware"
 	"avito-kitchen/internal/domain"
 )
@@ -35,6 +33,10 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	req.IdempotencyKey = r.Header.Get("Idempotency-Key")
+
+	if !checkOptionalUUID(w, r, "venue_id", req.VenueID) {
+		return
+	}
 
 	order, err := h.orderService.Create(r.Context(), userID, req)
 	if err != nil {
@@ -75,7 +77,10 @@ func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 
 	order, err := h.orderService.GetByUser(r.Context(), userID, id)
 	if err != nil {
@@ -88,8 +93,12 @@ func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 // VenueGetByID - отдаёт детали заказа только заведению-владельцу.
 func (h *OrderHandler) VenueGetByID(w http.ResponseWriter, r *http.Request) {
+	id, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	venueID, _ := middleware.GetVenueID(r.Context())
-	order, err := h.orderService.GetByVenue(r.Context(), venueID, chi.URLParam(r, "id"))
+	order, err := h.orderService.GetByVenue(r.Context(), venueID, id)
 	if err != nil {
 		writeServiceError(w, r, h.logger, err)
 		return
@@ -104,7 +113,10 @@ func (h *OrderHandler) Track(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
-	id := chi.URLParam(r, "id")
+	id, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 
 	order, err := h.orderService.GetByUser(r.Context(), userID, id)
 	if err != nil {
@@ -129,7 +141,10 @@ func (h *OrderHandler) Repeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	orderID := chi.URLParam(r, "id")
+	orderID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 
 	order, err := h.orderService.Repeat(r.Context(), userID, orderID)
 	if err != nil {
@@ -171,7 +186,10 @@ func (h *OrderHandler) VenueList(w http.ResponseWriter, r *http.Request) {
 
 // VenueAccept - принимает заказ заведения.
 func (h *OrderHandler) VenueAccept(w http.ResponseWriter, r *http.Request) {
-	orderID := chi.URLParam(r, "id")
+	orderID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	if err := h.orderService.UpdateVenueOrderStatus(r.Context(), venueID, orderID, domain.OrderStatusAccepted); err != nil {
@@ -184,7 +202,10 @@ func (h *OrderHandler) VenueAccept(w http.ResponseWriter, r *http.Request) {
 
 // VenueReject - отклоняет заказ заведения.
 func (h *OrderHandler) VenueReject(w http.ResponseWriter, r *http.Request) {
-	orderID := chi.URLParam(r, "id")
+	orderID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	if err := h.orderService.UpdateVenueOrderStatus(r.Context(), venueID, orderID, domain.OrderStatusCancelled); err != nil {
@@ -197,7 +218,10 @@ func (h *OrderHandler) VenueReject(w http.ResponseWriter, r *http.Request) {
 
 // VenueUpdateStatus - меняет статус заказа заведения на произвольный из тела.
 func (h *OrderHandler) VenueUpdateStatus(w http.ResponseWriter, r *http.Request) {
-	orderID := chi.URLParam(r, "id")
+	orderID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	var req struct {

@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/go-chi/chi/v5"
-
 	"avito-kitchen/internal/api/middleware"
 	"avito-kitchen/internal/domain"
 )
@@ -68,7 +66,10 @@ func (h *MenuHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 
 // ListByVenuePublic - отдаёт блюда заведения по id из пути с фильтрами, для всех.
 func (h *MenuHandler) ListByVenuePublic(w http.ResponseWriter, r *http.Request) {
-	venueID := chi.URLParam(r, "id")
+	venueID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	filters, err := menuFiltersFromQuery(r, venueID)
 	if err != nil {
 		writeError(w, r, http.StatusBadRequest, err.Error())
@@ -96,6 +97,10 @@ func (h *MenuHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 
 	item.VenueID = venueID
 
+	if !checkOptionalUUID(w, r, "category_id", item.CategoryID) {
+		return
+	}
+
 	if err := h.menuService.CreateItem(r.Context(), &item); err != nil {
 		writeServiceError(w, r, h.logger, err)
 		return
@@ -106,7 +111,10 @@ func (h *MenuHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 
 // UpdateItem - обновляет блюдо своего заведения.
 func (h *MenuHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
+	itemID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	var item domain.MenuItem
@@ -128,7 +136,10 @@ func (h *MenuHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 
 // DeleteItem - удаляет блюдо своего заведения.
 func (h *MenuHandler) DeleteItem(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
+	itemID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	if err := h.menuService.DeleteItem(r.Context(), venueID, itemID); err != nil {
@@ -141,7 +152,10 @@ func (h *MenuHandler) DeleteItem(w http.ResponseWriter, r *http.Request) {
 
 // UpdateAvailability - меняет наличие блюда своего заведения.
 func (h *MenuHandler) UpdateAvailability(w http.ResponseWriter, r *http.Request) {
-	itemID := chi.URLParam(r, "id")
+	itemID, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	var req struct {

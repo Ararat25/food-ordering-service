@@ -96,11 +96,9 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 	if err := orderTxRepo.CreateWithItems(ctx, order, orderItems, paymentMethod); err != nil {
 		// Параллельный запрос с тем же ключом мог успеть первым:
 		// тогда отдаём его заказ вместо ошибки дубля.
-		if req.IdempotencyKey != "" {
-			if existing, getErr := s.orderRepo.GetByUserAndIdempotencyKey(ctx, userID, req.IdempotencyKey); getErr == nil {
-				_ = tx.Rollback()
-				return existing, nil
-			}
+		if existing, done, idemErr := s.findIdempotentOrder(ctx, userID, req.IdempotencyKey); idemErr != nil || done {
+			_ = tx.Rollback()
+			return existing, idemErr
 		}
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
@@ -146,7 +144,7 @@ func checkCreateRequest(req domain.CreateOrderRequest) (string, error) {
 	return req.PaymentMethod, nil
 }
 
-// findIdempotentOrder - ищет готовый заказ по ключу, done говорит, что дальше идти не надо.
+// findIdempotentOrder - ищет готовый заказ по ключу вместе с позициями, done говорит, что дальше идти не надо.
 func (s *OrderService) findIdempotentOrder(ctx context.Context, userID, key string) (*domain.Order, bool, error) {
 	if key == "" {
 		return nil, false, nil
@@ -155,6 +153,10 @@ func (s *OrderService) findIdempotentOrder(ctx context.Context, userID, key stri
 	if err == nil {
 		if existing.UserID != userID {
 			return nil, true, domain.ErrForbidden
+		}
+		existing.Items, err = s.orderRepo.GetItems(ctx, existing.ID)
+		if err != nil {
+			return nil, true, fmt.Errorf("get order items: %w", err)
 		}
 		return existing, true, nil
 	}
@@ -423,6 +425,7 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 		DeliveryAddress: original.DeliveryAddress,
 		Comment:         original.Comment,
 		TotalAmount:     totalAmount,
+		Items:           newItems,
 	}
 
 	if err := orderTxRepo.CreateWithItems(ctx, order, newItems, defaultPaymentMethod); err != nil {

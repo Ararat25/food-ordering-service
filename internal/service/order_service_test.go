@@ -126,14 +126,18 @@ func TestOrderCreateCommitsAll(t *testing.T) {
 		sqlmock.NewRows([]string{"id", "cart_id", "menu_item_id", "quantity", "options", "created_at"}).
 			AddRow("ci-1", "cart-1", "item-1", 2, []byte("[]"), time.Now()),
 	)
-	mock.ExpectExec("INSERT INTO orders").WithArgs(
+	mock.ExpectQuery("INSERT INTO orders").WithArgs(
 		sqlmock.AnyArg(), "user-1", "venue-1", domain.OrderStatusPending,
 		domain.DeliveryType("delivery"), sqlmock.AnyArg(), sqlmock.AnyArg(),
 		sqlmock.AnyArg(), "", int64(30000), nil,
-	).WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO order_items").WithArgs(
+	).WillReturnRows(
+		sqlmock.NewRows([]string{"created_at", "updated_at"}).AddRow(time.Now(), time.Now()),
+	)
+	mock.ExpectQuery("INSERT INTO order_items").WithArgs(
 		sqlmock.AnyArg(), sqlmock.AnyArg(), "item-1", 2, int64(15000), sqlmock.AnyArg(),
-	).WillReturnResult(sqlmock.NewResult(1, 1))
+	).WillReturnRows(
+		sqlmock.NewRows([]string{"created_at"}).AddRow(time.Now()),
+	)
 	mock.ExpectExec("INSERT INTO payments").WithArgs(
 		sqlmock.AnyArg(), sqlmock.AnyArg(), domain.PaymentStatusPending, int64(30000), "card",
 	).WillReturnResult(sqlmock.NewResult(1, 1))
@@ -174,8 +178,12 @@ func TestOrderCreateRollsBack(t *testing.T) {
 		sqlmock.NewRows([]string{"id", "cart_id", "menu_item_id", "quantity", "options", "created_at"}).
 			AddRow("ci-1", "cart-1", "item-1", 2, []byte("[]"), time.Now()),
 	)
-	mock.ExpectExec("INSERT INTO orders").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO order_items").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectQuery("INSERT INTO orders").WillReturnRows(
+		sqlmock.NewRows([]string{"created_at", "updated_at"}).AddRow(time.Now(), time.Now()),
+	)
+	mock.ExpectQuery("INSERT INTO order_items").WillReturnRows(
+		sqlmock.NewRows([]string{"created_at"}).AddRow(time.Now()),
+	)
 	mock.ExpectExec("INSERT INTO payments").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("DELETE FROM cart_items").WillReturnError(errors.New("connection lost"))
 	mock.ExpectRollback()
@@ -259,6 +267,8 @@ func TestOrderRepeat(t *testing.T) {
 		require.Equal(t, domain.OrderStatusPending, order.Status)
 		require.Equal(t, int64(30000), order.TotalAmount)
 		require.NotEqual(t, "o-1", order.ID)
+		require.Len(t, order.Items, 1)
+		require.Equal(t, "item-1", order.Items[0].MenuItemID)
 		require.Len(t, orderRepo.created, 1)
 	})
 
@@ -289,7 +299,10 @@ func TestOrderRepeat(t *testing.T) {
 func TestOrderCreateIdempotency(t *testing.T) {
 	t.Run("повтор с тем же ключом возвращает готовый заказ", func(t *testing.T) {
 		existing := &domain.Order{ID: "o-old", UserID: "u-1", VenueID: "v-1", Status: domain.OrderStatusPending}
-		orderRepo := &stubOrderRepo{idemOrder: existing}
+		orderRepo := &stubOrderRepo{
+			idemOrder: existing,
+			items:     []domain.OrderItem{{ID: "oi-1", OrderID: "o-old", MenuItemID: "item-1", Quantity: 2}},
+		}
 		cart, items := orderTestCart()
 		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
 
@@ -298,6 +311,7 @@ func TestOrderCreateIdempotency(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.Equal(t, "o-old", got.ID)
+		require.NotEmpty(t, got.Items)
 		require.Empty(t, orderRepo.created)
 	})
 
