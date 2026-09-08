@@ -32,7 +32,7 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 	venueService := service.NewVenueService(venueRepo)
 	menuService := service.NewMenuService(menuCategoryRepo, menuItemRepo)
 	cartService := service.NewCartService(cartRepo, menuItemRepo)
-	orderService := service.NewOrderService(orderRepo, cartRepo, menuItemRepo)
+	orderService := service.NewOrderService(orderRepo, cartRepo, menuItemRepo, repository.NewTransactor(db))
 	reviewService := service.NewReviewService(reviewRepo, orderRepo)
 	notifService := service.NewNotificationService(notifRepo, pushTokenRepo)
 

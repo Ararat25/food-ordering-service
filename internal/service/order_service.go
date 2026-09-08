@@ -11,14 +11,15 @@ import (
 
 // OrderService - логика заказов.
 type OrderService struct {
-	orderRepo domain.OrderRepository    // заказы в базе
-	cartRepo  domain.CartRepository     // корзины в базе
-	itemRepo  domain.MenuItemRepository // блюда в базе
+	orderRepo  domain.OrderRepository    // заказы в базе
+	cartRepo   domain.CartRepository     // корзины в базе
+	itemRepo   domain.MenuItemRepository // блюда в базе
+	transactor domain.Transactor         // открывает транзакции
 }
 
 // NewOrderService - создаёт сервис заказов.
-func NewOrderService(orderRepo domain.OrderRepository, cartRepo domain.CartRepository, itemRepo domain.MenuItemRepository) *OrderService {
-	return &OrderService{orderRepo: orderRepo, cartRepo: cartRepo, itemRepo: itemRepo}
+func NewOrderService(orderRepo domain.OrderRepository, cartRepo domain.CartRepository, itemRepo domain.MenuItemRepository, transactor domain.Transactor) *OrderService {
+	return &OrderService{orderRepo: orderRepo, cartRepo: cartRepo, itemRepo: itemRepo, transactor: transactor}
 }
 
 // Create - делает заказ из корзины: проверяет блюда, считает сумму, чистит корзину.
@@ -83,12 +84,25 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 		TotalAmount:     totalAmount,
 	}
 
-	if err := s.orderRepo.CreateWithItems(ctx, order, orderItems); err != nil {
+	tx, err := s.transactor.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin order tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	orderTxRepo := s.orderRepo.WithTx(tx)
+	cartTxRepo := s.cartRepo.WithTx(tx)
+
+	if err := orderTxRepo.CreateWithItems(ctx, order, orderItems); err != nil {
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
 
-	if err := s.cartRepo.Clear(ctx, cart.ID); err != nil {
+	if err := cartTxRepo.Clear(ctx, cart.ID); err != nil {
 		return nil, fmt.Errorf("failed to clear cart: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit order tx: %w", err)
 	}
 
 	return order, nil

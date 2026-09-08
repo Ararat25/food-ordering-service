@@ -13,12 +13,20 @@ import (
 
 // CartRepo - корзины в базе данных.
 type CartRepo struct {
-	db *sql.DB // соединение с базой
+	db DBTX // соединение или транзакция
 }
+
+// CartRepo обещает выполнять контракт CartRepository.
+var _ domain.CartRepository = (*CartRepo)(nil)
 
 // NewCartRepo - создаёт репозиторий корзин.
 func NewCartRepo(db *sql.DB) *CartRepo {
 	return &CartRepo{db: db}
+}
+
+// WithTx - возвращает копию репозитория, пишущую в заданную транзакцию.
+func (r *CartRepo) WithTx(tx *sql.Tx) domain.CartRepository {
+	return &CartRepo{db: tx}
 }
 
 // GetOrCreate - находит корзину пользователя в заведении или создаёт новую.

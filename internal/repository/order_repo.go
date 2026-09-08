@@ -13,12 +13,20 @@ import (
 
 // OrderRepo - заказы в базе данных.
 type OrderRepo struct {
-	db *sql.DB // соединение с базой
+	db DBTX // соединение или транзакция
 }
+
+// OrderRepo обещает выполнять контракт OrderRepository.
+var _ domain.OrderRepository = (*OrderRepo)(nil)
 
 // NewOrderRepo - создаёт репозиторий заказов.
 func NewOrderRepo(db *sql.DB) *OrderRepo {
 	return &OrderRepo{db: db}
+}
+
+// WithTx - возвращает копию репозитория, пишущую в заданную транзакцию.
+func (r *OrderRepo) WithTx(tx *sql.Tx) domain.OrderRepository {
+	return &OrderRepo{db: tx}
 }
 
 // Create - сохраняет заказ без позиций.
@@ -43,14 +51,31 @@ func (r *OrderRepo) Create(ctx context.Context, order *domain.Order) error {
 	return nil
 }
 
-// CreateWithItems - сохраняет заказ с позициями и платежом в одной транзакции.
+// CreateWithItems - сохраняет заказ с позициями и платежом.
+// Если репозиторий уже привязан к транзакции через WithTx — пишет в неё,
+// иначе открывает свою. Так метод годится и для одиночных вызовов,
+// и как шаг большой транзакции на уровне сервиса.
 func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, items []domain.OrderItem) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	db, ok := r.db.(*sql.DB)
+	if !ok {
+		return r.insertOrderWithItems(ctx, r.db, order, items)
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := r.insertOrderWithItems(ctx, tx, order, items); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// insertOrderWithItems - пишет заказ, позиции и платёж в заданный DBTX.
+func (r *OrderRepo) insertOrderWithItems(ctx context.Context, q DBTX, order *domain.Order, items []domain.OrderItem) error {
 	orderQuery, orderArgs, err := sb.Insert("orders").
 		Columns("id", "user_id", "venue_id", "status", "delivery_type",
 			"delivery_address", "delivery_time", "estimated_delivery_time",
@@ -63,7 +88,7 @@ func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, it
 		return fmt.Errorf("build order query: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, orderQuery, orderArgs...); err != nil {
+	if _, err := q.ExecContext(ctx, orderQuery, orderArgs...); err != nil {
 		return fmt.Errorf("insert order: %w", err)
 	}
 
@@ -76,7 +101,7 @@ func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, it
 			return fmt.Errorf("build item query: %w", err)
 		}
 
-		if _, err := tx.ExecContext(ctx, itemQuery, itemArgs...); err != nil {
+		if _, err := q.ExecContext(ctx, itemQuery, itemArgs...); err != nil {
 			return fmt.Errorf("insert order item: %w", err)
 		}
 	}
@@ -89,11 +114,11 @@ func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, it
 		return fmt.Errorf("build payment query: %w", err)
 	}
 
-	if _, err := tx.ExecContext(ctx, paymentQuery, paymentArgs...); err != nil {
+	if _, err := q.ExecContext(ctx, paymentQuery, paymentArgs...); err != nil {
 		return fmt.Errorf("insert payment: %w", err)
 	}
 
-	return tx.Commit()
+	return nil
 }
 
 // GetByID - находит заказ по id.

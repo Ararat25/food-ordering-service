@@ -1,6 +1,14 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"database/sql"
+)
+
+// Transactor - начинает транзакции, реализацию даёт пакет repository.
+type Transactor interface {
+	BeginTx(ctx context.Context) (*sql.Tx, error) // открыть транзакцию
+}
 
 // UserRepository - работа с пользователями в БД.
 type UserRepository interface {
@@ -49,6 +57,7 @@ type MenuItemRepository interface {
 
 // CartRepository - работа с корзинами в БД.
 type CartRepository interface {
+	WithTx(tx *sql.Tx) CartRepository                                          // копия репозитория внутри транзакции
 	GetOrCreate(ctx context.Context, userID, venueID string) (*Cart, error)    // найти корзину или создать
 	GetByID(ctx context.Context, id string) (*Cart, error)                     // найти по id
 	Clear(ctx context.Context, cartID string) error                            // убрать все позиции
@@ -60,6 +69,7 @@ type CartRepository interface {
 
 // OrderRepository - работа с заказами в БД.
 type OrderRepository interface {
+	WithTx(tx *sql.Tx) OrderRepository                                                                       // копия репозитория внутри транзакции
 	Create(ctx context.Context, order *Order) error                                                          // сохранить заказ
 	CreateWithItems(ctx context.Context, order *Order, items []OrderItem) error                              // сохранить заказ с позициями и платежом в одной транзакции
 	GetByID(ctx context.Context, id string) (*Order, error)                                                  // найти по id
