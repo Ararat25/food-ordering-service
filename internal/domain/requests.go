@@ -8,6 +8,8 @@ type CreateOrderRequest struct {
 	DeliveryType    string `json:"delivery_type"`    // delivery или pickup
 	DeliveryAddress string `json:"delivery_address"` // куда везти
 	Comment         string `json:"comment"`          // комментарий клиента
+	PaymentMethod   string `json:"payment_method"`   // чем платим: card, cash, sbp
+	IdempotencyKey  string `json:"-"`                // ключ идемпотентности, приходит заголовком
 }
 
 // AddToCartRequest - данные для добавления блюда в корзину.

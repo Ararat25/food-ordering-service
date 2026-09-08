@@ -7,7 +7,17 @@ import (
 
 // Transactor - начинает транзакции, реализацию даёт пакет repository.
 type Transactor interface {
-	BeginTx(ctx context.Context) (*sql.Tx, error) // открыть транзакцию
+	BeginTx(ctx context.Context) (Tx, error) // открыть транзакцию
+}
+
+// Tx - транзакция: запросы плюс завершение. *sql.Tx удовлетворяет
+// контракту сам, домен про конкретный драйвер ничего не знает.
+type Tx interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+	Commit() error   // зафиксировать
+	Rollback() error // откатить
 }
 
 // UserRepository - работа с пользователями в БД.
@@ -44,12 +54,23 @@ type MenuCategoryRepository interface {
 	Delete(ctx context.Context, id string) error                                                     // удалить
 }
 
+// MenuItemFilters - фильтры и пагинация для блюд заведения.
+type MenuItemFilters struct {
+	VenueID   string // чьё заведение, обязательно
+	Search    string // поиск по названию и описанию
+	Available *bool  // только в наличии, nil — все
+	Page      int    // страница
+	PerPage   int    // записей на странице
+}
+
 // MenuItemRepository - работа с блюдами в БД.
 type MenuItemRepository interface {
+	WithTx(tx Tx) MenuItemRepository                                                                   // копия репозитория внутри транзакции
 	Create(ctx context.Context, item *MenuItem) error                                                  // сохранить новое
 	GetByID(ctx context.Context, id string) (*MenuItem, error)                                         // найти по id
 	GetByIDs(ctx context.Context, ids []string) ([]MenuItem, error)                                    // найти пачку по id одним запросом
-	ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]MenuItem, int, error)       // блюда заведения постранично плюс общее число
+	GetByIDsForUpdate(ctx context.Context, ids []string) ([]MenuItem, error)                           // пачка с локой строк, только внутри транзакции
+	ListByVenue(ctx context.Context, filters MenuItemFilters) ([]MenuItem, int, error)                 // блюда заведения с фильтрами плюс общее число
 	ListByCategory(ctx context.Context, categoryID string, page, perPage int) ([]MenuItem, int, error) // блюда категории постранично плюс общее число
 	Update(ctx context.Context, item *MenuItem) error                                                  // обновить
 	Delete(ctx context.Context, id string) error                                                       // удалить
@@ -58,7 +79,7 @@ type MenuItemRepository interface {
 
 // CartRepository - работа с корзинами в БД.
 type CartRepository interface {
-	WithTx(tx *sql.Tx) CartRepository                                          // копия репозитория внутри транзакции
+	WithTx(tx Tx) CartRepository                                               // копия репозитория внутри транзакции
 	GetOrCreate(ctx context.Context, userID, venueID string) (*Cart, error)    // найти корзину или создать
 	GetByID(ctx context.Context, id string) (*Cart, error)                     // найти по id
 	Clear(ctx context.Context, cartID string) error                            // убрать все позиции
@@ -70,10 +91,11 @@ type CartRepository interface {
 
 // OrderRepository - работа с заказами в БД.
 type OrderRepository interface {
-	WithTx(tx *sql.Tx) OrderRepository                                                                       // копия репозитория внутри транзакции
+	WithTx(tx Tx) OrderRepository                                                                            // копия репозитория внутри транзакции
 	Create(ctx context.Context, order *Order) error                                                          // сохранить заказ
-	CreateWithItems(ctx context.Context, order *Order, items []OrderItem) error                              // сохранить заказ с позициями и платежом в одной транзакции
+	CreateWithItems(ctx context.Context, order *Order, items []OrderItem, paymentMethod string) error        // сохранить заказ с позициями и платежом в одной транзакции
 	GetByID(ctx context.Context, id string) (*Order, error)                                                  // найти по id
+	GetByIdempotencyKey(ctx context.Context, key string) (*Order, error)                                     // найти по ключу идемпотентности
 	ListByUser(ctx context.Context, userID string, page, perPage int) ([]Order, int, error)                  // заказы пользователя
 	ListByVenue(ctx context.Context, venueID string, status string, page, perPage int) ([]Order, int, error) // заказы заведения
 	UpdateStatus(ctx context.Context, id string, status OrderStatus) error                                   // сменить статус

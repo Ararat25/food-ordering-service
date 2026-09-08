@@ -96,6 +96,9 @@ func (s *CartService) AddItem(ctx context.Context, userID, venueID string, req d
 
 // UpdateItemQuantity - меняет количество у позиции корзины.
 func (s *CartService) UpdateItemQuantity(ctx context.Context, userID, itemID string, quantity int) error {
+	if quantity <= 0 {
+		return fmt.Errorf("%w: quantity must be > 0", domain.ErrValidation)
+	}
 	return s.cartRepo.UpdateItemQuantity(ctx, itemID, quantity)
 }
 

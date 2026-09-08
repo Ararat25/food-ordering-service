@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,11 +12,12 @@ import (
 // VenueHandler - HTTP для заведений, публичная часть.
 type VenueHandler struct {
 	venueService domain.VenueService // логика заведений
+	logger       *slog.Logger        // куда писать внутренние ошибки
 }
 
 // NewVenueHandler - создаёт хендлер заведений.
-func NewVenueHandler(venueService domain.VenueService) *VenueHandler {
-	return &VenueHandler{venueService: venueService}
+func NewVenueHandler(venueService domain.VenueService, logger *slog.Logger) *VenueHandler {
+	return &VenueHandler{venueService: venueService, logger: logger}
 }
 
 // List - отдаёт список заведений с поиском и пагинацией.
@@ -31,7 +33,7 @@ func (h *VenueHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	venues, total, err := h.venueService.List(r.Context(), filters)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -44,7 +46,7 @@ func (h *VenueHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	venue, err := h.venueService.GetByID(r.Context(), id)
 	if err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 

@@ -62,7 +62,7 @@ func TestOrderCreateItemProblems(t *testing.T) {
 		cart, items := orderTestCart()
 		items.items = map[string]*domain.MenuItem{}
 
-		svc := NewOrderService(&stubOrderRepo{}, cart, items, &stubTransactor{})
+		svc := NewOrderService(&stubOrderRepo{}, cart, items, &stubTransactor{tx: &stubTx{}})
 		_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
 			VenueID: "venue-1", DeliveryType: "pickup",
 		})
@@ -73,7 +73,7 @@ func TestOrderCreateItemProblems(t *testing.T) {
 		cart, items := orderTestCart()
 		items.items["item-1"].IsAvailable = false
 
-		svc := NewOrderService(&stubOrderRepo{}, cart, items, &stubTransactor{})
+		svc := NewOrderService(&stubOrderRepo{}, cart, items, &stubTransactor{tx: &stubTx{}})
 		_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
 			VenueID: "venue-1", DeliveryType: "pickup",
 		})
@@ -94,7 +94,7 @@ func TestOrderCreateLoadsItemsInOneBatch(t *testing.T) {
 		"item-1": {ID: "item-1", VenueID: "v-1", Price: 15000, IsAvailable: true},
 		"item-2": {ID: "item-2", VenueID: "v-1", Price: 25000, IsAvailable: true},
 	}}
-	svc := NewOrderService(orderRepo, &stubCartRepo{}, items, &stubTransactor{})
+	svc := NewOrderService(orderRepo, &stubCartRepo{}, items, &stubTransactor{tx: &stubTx{}})
 
 	order, err := svc.Repeat(context.Background(), "u-1", "o-1")
 	require.NoError(t, err)
@@ -128,7 +128,7 @@ func TestOrderCreateCommitsAll(t *testing.T) {
 	mock.ExpectExec("INSERT INTO orders").WithArgs(
 		sqlmock.AnyArg(), "user-1", "venue-1", domain.OrderStatusPending,
 		domain.DeliveryType("delivery"), sqlmock.AnyArg(), sqlmock.AnyArg(),
-		sqlmock.AnyArg(), "", int64(30000),
+		sqlmock.AnyArg(), "", int64(30000), nil,
 	).WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO order_items").WithArgs(
 		sqlmock.AnyArg(), sqlmock.AnyArg(), "item-1", 2, int64(15000), sqlmock.AnyArg(),
@@ -251,7 +251,7 @@ func TestOrderRepeat(t *testing.T) {
 		items := &stubMenuItemRepo{items: map[string]*domain.MenuItem{
 			"item-1": {ID: "item-1", VenueID: "v-1", Price: 15000, IsAvailable: true},
 		}}
-		svc := NewOrderService(orderRepo, &stubCartRepo{}, items, &stubTransactor{})
+		svc := NewOrderService(orderRepo, &stubCartRepo{}, items, &stubTransactor{tx: &stubTx{}})
 
 		order, err := svc.Repeat(context.Background(), "u-1", "o-1")
 		require.NoError(t, err)
@@ -278,9 +278,63 @@ func TestOrderRepeat(t *testing.T) {
 		items := &stubMenuItemRepo{items: map[string]*domain.MenuItem{
 			"item-1": {ID: "item-1", VenueID: "v-1", Price: 15000, IsAvailable: false},
 		}}
-		svc := NewOrderService(orderRepo, &stubCartRepo{}, items, &stubTransactor{})
+		svc := NewOrderService(orderRepo, &stubCartRepo{}, items, &stubTransactor{tx: &stubTx{}})
 		_, err := svc.Repeat(context.Background(), "u-1", "o-1")
 		require.Error(t, err)
 		require.Empty(t, orderRepo.created)
+	})
+}
+
+func TestOrderCreateIdempotency(t *testing.T) {
+	t.Run("повтор с тем же ключом возвращает готовый заказ", func(t *testing.T) {
+		existing := &domain.Order{ID: "o-old", UserID: "u-1", VenueID: "v-1", Status: domain.OrderStatusPending}
+		orderRepo := &stubOrderRepo{idemOrder: existing}
+		cart, items := orderTestCart()
+		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
+
+		got, err := svc.Create(context.Background(), "u-1", domain.CreateOrderRequest{
+			VenueID: "venue-1", DeliveryType: "delivery", IdempotencyKey: "key-1",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "o-old", got.ID)
+		require.Empty(t, orderRepo.created)
+	})
+
+	t.Run("чужой ключ не отдают", func(t *testing.T) {
+		existing := &domain.Order{ID: "o-old", UserID: "u-2", VenueID: "v-1", Status: domain.OrderStatusPending}
+		orderRepo := &stubOrderRepo{idemOrder: existing}
+		cart, items := orderTestCart()
+		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
+
+		_, err := svc.Create(context.Background(), "u-1", domain.CreateOrderRequest{
+			VenueID: "venue-1", DeliveryType: "delivery", IdempotencyKey: "key-1",
+		})
+		require.ErrorIs(t, err, domain.ErrForbidden)
+	})
+}
+
+func TestOrderCreatePaymentMethod(t *testing.T) {
+	t.Run("метод из запроса уходит в платёж", func(t *testing.T) {
+		orderRepo := &stubOrderRepo{}
+		cart, items := orderTestCart()
+		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
+
+		_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
+			VenueID: "venue-1", DeliveryType: "delivery", PaymentMethod: "cash",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "cash", orderRepo.payMethod)
+	})
+
+	t.Run("без метода подставляют карту", func(t *testing.T) {
+		orderRepo := &stubOrderRepo{}
+		cart, items := orderTestCart()
+		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
+
+		_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
+			VenueID: "venue-1", DeliveryType: "delivery",
+		})
+		require.NoError(t, err)
+		require.Equal(t, "card", orderRepo.payMethod)
 	})
 }

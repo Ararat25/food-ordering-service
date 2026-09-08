@@ -27,6 +27,32 @@ func TestMenuCreateItem(t *testing.T) {
 	require.JSONEq(t, `[]`, string(items.created[0].Options))
 }
 
+func TestMenuCreateItemValidation(t *testing.T) {
+	t.Run("без имени не создают", func(t *testing.T) {
+		items := menuTestSetup()
+		svc := NewMenuService(&stubMenuCategoryRepo{}, items)
+		err := svc.CreateItem(context.Background(), &domain.MenuItem{VenueID: "venue-1", Price: 100})
+		require.ErrorIs(t, err, domain.ErrValidation)
+		require.Empty(t, items.created)
+	})
+
+	t.Run("отрицательную цену не создают", func(t *testing.T) {
+		items := menuTestSetup()
+		svc := NewMenuService(&stubMenuCategoryRepo{}, items)
+		err := svc.CreateItem(context.Background(), &domain.MenuItem{VenueID: "venue-1", Name: "Суп", Price: -1})
+		require.ErrorIs(t, err, domain.ErrValidation)
+		require.Empty(t, items.created)
+	})
+
+	t.Run("категорию без имени не создают", func(t *testing.T) {
+		cats := &stubMenuCategoryRepo{}
+		svc := NewMenuService(cats, menuTestSetup())
+		err := svc.CreateCategory(context.Background(), &domain.MenuCategory{VenueID: "venue-1"})
+		require.ErrorIs(t, err, domain.ErrValidation)
+		require.Empty(t, cats.created)
+	})
+}
+
 func TestMenuVenueScoping(t *testing.T) {
 	t.Run("обновить чужое блюдо", func(t *testing.T) {
 		items := menuTestSetup()
@@ -91,7 +117,7 @@ func TestMenuListPagination(t *testing.T) {
 	cats := &stubMenuCategoryRepo{listTotal: 7}
 	svc := NewMenuService(cats, items)
 
-	gotItems, total, err := svc.ListItems(context.Background(), "venue-1", 0, 0)
+	gotItems, total, err := svc.ListItems(context.Background(), domain.MenuItemFilters{VenueID: "venue-1"})
 	require.NoError(t, err)
 	require.Equal(t, 42, total)
 	require.Equal(t, domain.DefaultPage, items.listPage)

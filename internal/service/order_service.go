@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 
 	"avito-kitchen/internal/domain"
 )
+
+// defaultPaymentMethod - способ оплаты, если клиент его не указал.
+const defaultPaymentMethod = "card"
 
 // OrderService - логика заказов.
 type OrderService struct {
@@ -24,63 +28,46 @@ func NewOrderService(orderRepo domain.OrderRepository, cartRepo domain.CartRepos
 
 // Create - делает заказ из корзины: проверяет блюда, считает сумму, чистит корзину.
 func (s *OrderService) Create(ctx context.Context, userID string, req domain.CreateOrderRequest) (*domain.Order, error) {
-	if req.VenueID == "" {
-		return nil, fmt.Errorf("%w: venue_id is required", domain.ErrValidation)
-	}
-	if req.DeliveryType != "delivery" && req.DeliveryType != "pickup" {
-		return nil, fmt.Errorf("%w: invalid delivery type: %s", domain.ErrValidation, req.DeliveryType)
-	}
-
-	cart, err := s.cartRepo.GetOrCreate(ctx, userID, req.VenueID)
-	if err != nil {
-		return nil, fmt.Errorf("cart not found: %w", err)
-	}
-
-	cartItems, err := s.cartRepo.GetItems(ctx, cart.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get cart items: %w", err)
-	}
-
-	if len(cartItems) == 0 {
-		return nil, fmt.Errorf("%w: cart is empty", domain.ErrValidation)
-	}
-
-	var totalAmount int64
-	var orderItems []domain.OrderItem
-	orderID := uuid.New().String()
-
-	// Все блюда корзины грузим одним запросом, а не по одному в цикле.
-	ids := make([]string, 0, len(cartItems))
-	for _, ci := range cartItems {
-		ids = append(ids, ci.MenuItemID)
-	}
-	menuItems, err := s.loadMenuItems(ctx, ids)
+	paymentMethod, err := checkCreateRequest(req)
 	if err != nil {
 		return nil, err
 	}
 
+	// Повтор с тем же ключом возвращает уже созданный заказ, а не дубль.
+	if existing, done, err := s.findIdempotentOrder(ctx, userID, req.IdempotencyKey); err != nil || done {
+		return existing, err
+	}
+
+	cart, cartItems, err := s.loadCart(ctx, userID, req.VenueID)
+	if err != nil {
+		return nil, err
+	}
+
+	tx, err := s.transactor.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin order tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	orderTxRepo := s.orderRepo.WithTx(tx)
+	cartTxRepo := s.cartRepo.WithTx(tx)
+	itemTxRepo := s.itemRepo.WithTx(tx)
+
+	// Блюда грузим с локой строк: между проверкой наличия и записью
+	// заказа их никто не снимет с продажи.
+	ids := make([]string, 0, len(cartItems))
 	for _, ci := range cartItems {
-		menuItem, ok := menuItems[ci.MenuItemID]
-		if !ok {
-			return nil, fmt.Errorf("menu item %s not found: %w", ci.MenuItemID, domain.ErrNotFound)
-		}
+		ids = append(ids, ci.MenuItemID)
+	}
+	menuItems, err := loadMenuItems(ctx, itemTxRepo, ids)
+	if err != nil {
+		return nil, err
+	}
 
-		if !menuItem.IsAvailable {
-			return nil, fmt.Errorf("%w: menu item %s is not available", domain.ErrValidation, menuItem.Name)
-		}
-
-		itemTotal := menuItem.Price * int64(ci.Quantity)
-		totalAmount += itemTotal
-
-		orderItem := domain.OrderItem{
-			ID:         uuid.New().String(),
-			OrderID:    orderID,
-			MenuItemID: ci.MenuItemID,
-			Quantity:   ci.Quantity,
-			Price:      menuItem.Price,
-			Options:    normalizeOptions(ci.Options),
-		}
-		orderItems = append(orderItems, orderItem)
+	orderID := uuid.New().String()
+	orderItems, totalAmount, err := buildOrderItems(cartItems, menuItems, orderID)
+	if err != nil {
+		return nil, err
 	}
 
 	order := &domain.Order{
@@ -92,18 +79,18 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 		DeliveryAddress: req.DeliveryAddress,
 		Comment:         req.Comment,
 		TotalAmount:     totalAmount,
+		IdempotencyKey:  req.IdempotencyKey,
 	}
 
-	tx, err := s.transactor.BeginTx(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin order tx: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	orderTxRepo := s.orderRepo.WithTx(tx)
-	cartTxRepo := s.cartRepo.WithTx(tx)
-
-	if err := orderTxRepo.CreateWithItems(ctx, order, orderItems); err != nil {
+	if err := orderTxRepo.CreateWithItems(ctx, order, orderItems, paymentMethod); err != nil {
+		// Параллельный запрос с тем же ключом мог успеть первым:
+		// тогда отдаём его заказ вместо ошибки дубля.
+		if req.IdempotencyKey != "" {
+			if existing, getErr := s.orderRepo.GetByIdempotencyKey(ctx, req.IdempotencyKey); getErr == nil {
+				_ = tx.Rollback()
+				return existing, nil
+			}
+		}
 		return nil, fmt.Errorf("failed to create order: %w", err)
 	}
 
@@ -116,6 +103,87 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 	}
 
 	return order, nil
+}
+
+// checkCreateRequest - проверяет входные данные заказа, возвращает способ оплаты.
+func checkCreateRequest(req domain.CreateOrderRequest) (string, error) {
+	if req.VenueID == "" {
+		return "", fmt.Errorf("%w: venue_id is required", domain.ErrValidation)
+	}
+	if req.DeliveryType != string(domain.DeliveryTypeDelivery) && req.DeliveryType != string(domain.DeliveryTypePickup) {
+		return "", fmt.Errorf("%w: invalid delivery type: %s", domain.ErrValidation, req.DeliveryType)
+	}
+	if req.PaymentMethod == "" {
+		return defaultPaymentMethod, nil
+	}
+	return req.PaymentMethod, nil
+}
+
+// findIdempotentOrder - ищет готовый заказ по ключу, done говорит, что дальше идти не надо.
+func (s *OrderService) findIdempotentOrder(ctx context.Context, userID, key string) (*domain.Order, bool, error) {
+	if key == "" {
+		return nil, false, nil
+	}
+	existing, err := s.orderRepo.GetByIdempotencyKey(ctx, key)
+	if err == nil {
+		if existing.UserID != userID {
+			return nil, true, domain.ErrForbidden
+		}
+		return existing, true, nil
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		return nil, true, err
+	}
+	return nil, false, nil
+}
+
+// loadCart - грузит корзину с позициями, пустая корзина даёт ErrValidation.
+func (s *OrderService) loadCart(ctx context.Context, userID, venueID string) (*domain.Cart, []domain.CartItem, error) {
+	cart, err := s.cartRepo.GetOrCreate(ctx, userID, venueID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cart not found: %w", err)
+	}
+
+	cartItems, err := s.cartRepo.GetItems(ctx, cart.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get cart items: %w", err)
+	}
+
+	if len(cartItems) == 0 {
+		return nil, nil, fmt.Errorf("%w: cart is empty", domain.ErrValidation)
+	}
+
+	return cart, cartItems, nil
+}
+
+// buildOrderItems - проверяет наличие блюд и считает сумму позиций.
+func buildOrderItems(cartItems []domain.CartItem, menuItems map[string]domain.MenuItem, orderID string) ([]domain.OrderItem, int64, error) {
+	var totalAmount int64
+	orderItems := make([]domain.OrderItem, 0, len(cartItems))
+
+	for _, ci := range cartItems {
+		menuItem, ok := menuItems[ci.MenuItemID]
+		if !ok {
+			return nil, 0, fmt.Errorf("menu item %s not found: %w", ci.MenuItemID, domain.ErrNotFound)
+		}
+
+		if !menuItem.IsAvailable {
+			return nil, 0, fmt.Errorf("%w: menu item %s is not available", domain.ErrValidation, menuItem.Name)
+		}
+
+		totalAmount += menuItem.Price * int64(ci.Quantity)
+
+		orderItems = append(orderItems, domain.OrderItem{
+			ID:         uuid.New().String(),
+			OrderID:    orderID,
+			MenuItemID: ci.MenuItemID,
+			Quantity:   ci.Quantity,
+			Price:      menuItem.Price,
+			Options:    normalizeOptions(ci.Options),
+		})
+	}
+
+	return orderItems, totalAmount, nil
 }
 
 // GetByID - возвращает заказ по id.
@@ -186,9 +254,9 @@ func validateTransition(from, to domain.OrderStatus) error {
 	return fmt.Errorf("%w: invalid status transition from %s to %s", domain.ErrValidation, from, to)
 }
 
-// loadMenuItems - грузит блюда одним запросом и раскладывает по id.
-func (s *OrderService) loadMenuItems(ctx context.Context, ids []string) (map[string]domain.MenuItem, error) {
-	items, err := s.itemRepo.GetByIDs(ctx, ids)
+// loadMenuItems - грузит блюда одним запросом с локой строк и раскладывает по id.
+func loadMenuItems(ctx context.Context, itemRepo domain.MenuItemRepository, ids []string) (map[string]domain.MenuItem, error) {
+	items, err := itemRepo.GetByIDsForUpdate(ctx, ids)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load menu items: %w", err)
 	}
@@ -221,18 +289,27 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 		return nil, err
 	}
 
-	var totalAmount int64
-	var newItems []domain.OrderItem
-	newOrderID := uuid.New().String()
+	tx, err := s.transactor.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin repeat tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	orderTxRepo := s.orderRepo.WithTx(tx)
+	itemTxRepo := s.itemRepo.WithTx(tx)
 
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		ids = append(ids, item.MenuItemID)
 	}
-	menuItems, err := s.loadMenuItems(ctx, ids)
+	menuItems, err := loadMenuItems(ctx, itemTxRepo, ids)
 	if err != nil {
 		return nil, err
 	}
+
+	var totalAmount int64
+	var newItems []domain.OrderItem
+	newOrderID := uuid.New().String()
 
 	for _, item := range items {
 		menuItem, ok := menuItems[item.MenuItemID]
@@ -244,18 +321,16 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 			continue
 		}
 
-		itemTotal := menuItem.Price * int64(item.Quantity)
-		totalAmount += itemTotal
+		totalAmount += menuItem.Price * int64(item.Quantity)
 
-		newItem := domain.OrderItem{
+		newItems = append(newItems, domain.OrderItem{
 			ID:         uuid.New().String(),
 			OrderID:    newOrderID,
 			MenuItemID: item.MenuItemID,
 			Quantity:   item.Quantity,
 			Price:      menuItem.Price,
 			Options:    normalizeOptions(item.Options),
-		}
-		newItems = append(newItems, newItem)
+		})
 	}
 
 	if len(newItems) == 0 {
@@ -273,8 +348,12 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 		TotalAmount:     totalAmount,
 	}
 
-	if err := s.orderRepo.CreateWithItems(ctx, order, newItems); err != nil {
+	if err := orderTxRepo.CreateWithItems(ctx, order, newItems, defaultPaymentMethod); err != nil {
 		return nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit repeat tx: %w", err)
 	}
 
 	return order, nil

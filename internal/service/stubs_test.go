@@ -22,10 +22,47 @@ var (
 
 var errUnexpectedTx = errors.New("unexpected BeginTx call")
 
-type stubTransactor struct{}
+type stubTransactor struct {
+	tx  domain.Tx
+	err error
+}
 
-func (s *stubTransactor) BeginTx(_ context.Context) (*sql.Tx, error) {
-	return nil, errUnexpectedTx
+func (s *stubTransactor) BeginTx(_ context.Context) (domain.Tx, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.tx == nil {
+		return nil, errUnexpectedTx
+	}
+	return s.tx, nil
+}
+
+type stubTx struct {
+	committed  bool
+	rolledBack bool
+	commitErr  error
+}
+
+func (t *stubTx) ExecContext(_ context.Context, _ string, _ ...any) (sql.Result, error) {
+	return nil, errors.New("stub tx: queries go through repositories")
+}
+
+func (t *stubTx) QueryContext(_ context.Context, _ string, _ ...any) (*sql.Rows, error) {
+	return nil, errors.New("stub tx: queries go through repositories")
+}
+
+func (t *stubTx) QueryRowContext(_ context.Context, _ string, _ ...any) *sql.Row {
+	return nil
+}
+
+func (t *stubTx) Commit() error {
+	t.committed = true
+	return t.commitErr
+}
+
+func (t *stubTx) Rollback() error {
+	t.rolledBack = true
+	return nil
 }
 
 type stubCartRepo struct {
@@ -43,7 +80,7 @@ type stubCartRepo struct {
 	removed    []string
 }
 
-func (s *stubCartRepo) WithTx(_ *sql.Tx) domain.CartRepository { return s }
+func (s *stubCartRepo) WithTx(_ domain.Tx) domain.CartRepository { return s }
 
 func (s *stubCartRepo) GetOrCreate(_ context.Context, _, _ string) (*domain.Cart, error) {
 	if s.cartErr != nil {
@@ -92,20 +129,34 @@ type stubOrderRepo struct {
 	statusErr error
 	created   []domain.Order
 	statuses  map[string]domain.OrderStatus
+	payMethod string
+	idemOrder *domain.Order
+	idemErr   error
 }
 
-func (s *stubOrderRepo) WithTx(_ *sql.Tx) domain.OrderRepository { return s }
+func (s *stubOrderRepo) WithTx(_ domain.Tx) domain.OrderRepository { return s }
 
 func (s *stubOrderRepo) Create(_ context.Context, _ *domain.Order) error { return nil }
 
-func (s *stubOrderRepo) CreateWithItems(_ context.Context, order *domain.Order, items []domain.OrderItem) error {
+func (s *stubOrderRepo) CreateWithItems(_ context.Context, order *domain.Order, items []domain.OrderItem, payMethod string) error {
 	if s.createErr != nil {
 		return s.createErr
 	}
+	s.payMethod = payMethod
 	cp := *order
 	cp.Items = items
 	s.created = append(s.created, cp)
 	return nil
+}
+
+func (s *stubOrderRepo) GetByIdempotencyKey(_ context.Context, _ string) (*domain.Order, error) {
+	if s.idemErr != nil {
+		return nil, s.idemErr
+	}
+	if s.idemOrder == nil {
+		return nil, domain.ErrNotFound
+	}
+	return s.idemOrder, nil
 }
 
 func (s *stubOrderRepo) GetByID(_ context.Context, _ string) (*domain.Order, error) {
@@ -185,8 +236,8 @@ func (s *stubMenuItemRepo) UpdateAvailability(_ context.Context, id string, avai
 	return nil
 }
 
-func (s *stubMenuItemRepo) ListByVenue(_ context.Context, _ string, page, perPage int) ([]domain.MenuItem, int, error) {
-	s.listPage, s.listPer = page, perPage
+func (s *stubMenuItemRepo) ListByVenue(_ context.Context, f domain.MenuItemFilters) ([]domain.MenuItem, int, error) {
+	s.listPage, s.listPer = f.Page, f.PerPage
 	return nil, s.listTotal, nil
 }
 
@@ -197,6 +248,15 @@ func (s *stubMenuItemRepo) ListByCategory(_ context.Context, _ string, page, per
 
 func (s *stubMenuItemRepo) GetByIDs(_ context.Context, ids []string) ([]domain.MenuItem, error) {
 	s.byIDsCalls++
+	return s.findByIDs(ids)
+}
+
+func (s *stubMenuItemRepo) GetByIDsForUpdate(_ context.Context, ids []string) ([]domain.MenuItem, error) {
+	s.byIDsCalls++
+	return s.findByIDs(ids)
+}
+
+func (s *stubMenuItemRepo) findByIDs(ids []string) ([]domain.MenuItem, error) {
 	var out []domain.MenuItem
 	for _, id := range ids {
 		item, ok := s.items[id]
@@ -207,6 +267,8 @@ func (s *stubMenuItemRepo) GetByIDs(_ context.Context, ids []string) ([]domain.M
 	}
 	return out, s.getErr
 }
+
+func (s *stubMenuItemRepo) WithTx(_ domain.Tx) domain.MenuItemRepository { return s }
 
 type stubMenuCategoryRepo struct {
 	created   []*domain.MenuCategory

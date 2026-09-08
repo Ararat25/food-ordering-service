@@ -31,7 +31,7 @@ var (
 	orderColumns = []string{
 		"id", "user_id", "venue_id", "status", "delivery_type",
 		"delivery_address", "delivery_time", "estimated_delivery_time",
-		"comment", "total_amount", "created_at", "updated_at",
+		"comment", "total_amount", "created_at", "updated_at", "idempotency_key",
 	}
 
 	orderItemColumns = []string{

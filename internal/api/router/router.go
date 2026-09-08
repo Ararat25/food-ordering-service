@@ -37,12 +37,12 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 	notifService := service.NewNotificationService(notifRepo, pushTokenRepo)
 
 	healthHandler := handler.NewHealthHandler(db)
-	venueHandler := handler.NewVenueHandler(venueService)
-	cartHandler := handler.NewCartHandler(cartService)
-	orderHandler := handler.NewOrderHandler(orderService)
-	menuHandler := handler.NewMenuHandler(menuService)
-	reviewHandler := handler.NewReviewHandler(reviewService)
-	notifHandler := handler.NewNotificationHandler(notifService)
+	venueHandler := handler.NewVenueHandler(venueService, logger)
+	cartHandler := handler.NewCartHandler(cartService, logger)
+	orderHandler := handler.NewOrderHandler(orderService, logger)
+	menuHandler := handler.NewMenuHandler(menuService, logger)
+	reviewHandler := handler.NewReviewHandler(reviewService, logger)
+	notifHandler := handler.NewNotificationHandler(notifService, logger)
 
 	r.Get("/health", healthHandler.Health)
 	r.Get("/health/ready", healthHandler.Ready)
@@ -85,6 +85,7 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 		r.Route("/menu", func(r chi.Router) {
 			r.Get("/", menuHandler.ListItems)
 			r.Post("/", menuHandler.CreateItem)
+			r.Get("/categories", menuHandler.ListCategories)
 			r.Put("/{id}", menuHandler.UpdateItem)
 			r.Delete("/{id}", menuHandler.DeleteItem)
 			r.Patch("/{id}/availability", menuHandler.UpdateAvailability)

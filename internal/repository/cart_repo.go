@@ -25,8 +25,12 @@ func NewCartRepo(db *sql.DB) *CartRepo {
 }
 
 // WithTx - возвращает копию репозитория, пишущую в заданную транзакцию.
-func (r *CartRepo) WithTx(tx *sql.Tx) domain.CartRepository {
-	return &CartRepo{db: tx}
+func (r *CartRepo) WithTx(tx domain.Tx) domain.CartRepository {
+	sqlTx, ok := tx.(*sql.Tx)
+	if !ok {
+		panic("repository: WithTx supports only *sql.Tx transactions")
+	}
+	return &CartRepo{db: sqlTx}
 }
 
 // GetOrCreate - находит корзину пользователя в заведении или создаёт новую.
@@ -43,26 +47,31 @@ func (r *CartRepo) GetOrCreate(ctx context.Context, userID, venueID string) (*do
 	err = r.db.QueryRowContext(ctx, query, args...).Scan(
 		&cart.ID, &cart.UserID, &cart.VenueID, &cart.CreatedAt, &cart.UpdatedAt,
 	)
-	if err == sql.ErrNoRows {
-		cartID := uuid.New().String()
-		insertQuery, insertArgs, insertErr := sb.Insert("carts").
-			Columns("id", "user_id", "venue_id").
-			Values(cartID, userID, venueID).
-			ToSql()
-		if insertErr != nil {
-			return nil, fmt.Errorf("build insert query: %w", insertErr)
-		}
-
-		_, insertErr = r.db.ExecContext(ctx, insertQuery, insertArgs...)
-		if insertErr != nil {
-			return nil, fmt.Errorf("create cart: %w", insertErr)
-		}
-
-		cart.ID = cartID
-		cart.UserID = userID
-		cart.VenueID = venueID
+	if err == nil {
 		return &cart, nil
 	}
+	if err != sql.ErrNoRows {
+		return nil, fmt.Errorf("get cart: %w", err)
+	}
+
+	cartID := uuid.New().String()
+	insertQuery, insertArgs, insertErr := sb.Insert("carts").
+		Columns("id", "user_id", "venue_id").
+		Values(cartID, userID, venueID).
+		Suffix("ON CONFLICT (user_id, venue_id) DO NOTHING").
+		ToSql()
+	if insertErr != nil {
+		return nil, fmt.Errorf("build insert query: %w", insertErr)
+	}
+
+	if _, insertErr = r.db.ExecContext(ctx, insertQuery, insertArgs...); insertErr != nil {
+		return nil, fmt.Errorf("create cart: %w", insertErr)
+	}
+
+	// Корзину мог создать параллельный запрос — читаем то, что есть по факту.
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(
+		&cart.ID, &cart.UserID, &cart.VenueID, &cart.CreatedAt, &cart.UpdatedAt,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("get cart: %w", err)
 	}

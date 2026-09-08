@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"avito-kitchen/internal/domain"
@@ -9,18 +10,19 @@ import (
 // NotificationHandler - обработчик для уведомлений.
 type NotificationHandler struct {
 	notifService domain.NotificationService // логика уведомлений
+	logger       *slog.Logger               // куда писать внутренние ошибки
 }
 
 // NewNotificationHandler - создаёт хендлер уведомлений.
-func NewNotificationHandler(notifService domain.NotificationService) *NotificationHandler {
-	return &NotificationHandler{notifService: notifService}
+func NewNotificationHandler(notifService domain.NotificationService, logger *slog.Logger) *NotificationHandler {
+	return &NotificationHandler{notifService: notifService, logger: logger}
 }
 
 // RegisterToken - сохраняет пуш-токен устройства пользователя.
 func (h *NotificationHandler) RegisterToken(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
@@ -28,13 +30,13 @@ func (h *NotificationHandler) RegisterToken(w http.ResponseWriter, r *http.Reque
 		Token    string `json:"token"`    // сам токен
 		Platform string `json:"platform"` // платформа
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.Token == "" || req.Platform == "" {
-		writeError(w, http.StatusBadRequest, "token and platform are required")
+		writeError(w, r, http.StatusBadRequest, "token and platform are required")
 		return
 	}
 
@@ -43,7 +45,7 @@ func (h *NotificationHandler) RegisterToken(w http.ResponseWriter, r *http.Reque
 		Token:    req.Token,
 		Platform: req.Platform,
 	}); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -54,7 +56,7 @@ func (h *NotificationHandler) RegisterToken(w http.ResponseWriter, r *http.Reque
 func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
@@ -62,7 +64,7 @@ func (h *NotificationHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	notifications, total, err := h.notifService.ListByUser(r.Context(), userID, page, perPage)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 

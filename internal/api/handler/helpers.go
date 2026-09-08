@@ -3,9 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
+	"avito-kitchen/internal/api/middleware"
 	"avito-kitchen/internal/domain"
 )
 
@@ -23,12 +25,32 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 	_ = json.NewEncoder(w).Encode(data)
 }
 
-// writeError - отдаёт ошибку в формате {"error","code"}.
-func writeError(w http.ResponseWriter, status int, message string) {
-	writeJSON(w, status, map[string]any{
+// writeError - отдаёт ошибку в формате {"error","code"} плюс request_id для корреляции с логами.
+func writeError(w http.ResponseWriter, r *http.Request, status int, message string) {
+	body := map[string]any{
 		"error": message,
 		"code":  status,
-	})
+	}
+	if requestID, ok := r.Context().Value(middleware.RequestIDKey).(string); ok {
+		body["request_id"] = requestID
+	}
+	writeJSON(w, status, body)
+}
+
+// writeServiceError - отдаёт ошибку сервисного слоя: клиентские как есть,
+// внутренние прячет за общим текстом, а детали пишет в лог.
+func writeServiceError(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {
+	status := domainErrorToHTTP(err)
+	if status >= http.StatusInternalServerError {
+		logger.Error("internal error",
+			"error", err,
+			"method", r.Method,
+			"path", r.URL.Path,
+		)
+		writeError(w, r, status, "internal error")
+		return
+	}
+	writeError(w, r, status, err.Error())
 }
 
 // writePaginated - отдаёт список с блоком пагинации.
@@ -44,10 +66,16 @@ func writePaginated(w http.ResponseWriter, data any, page, perPage, total int) {
 	})
 }
 
-// decodeJSON - читает JSON из тела запроса.
-func decodeJSON(r *http.Request, v any) error {
+// maxBodyBytes - потолок тела запроса, защита от гигантских JSON.
+const maxBodyBytes = 1 << 20
+
+// decodeJSON - читает JSON из тела запроса, лишние поля и переполнение отбивает.
+func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	defer func() { _ = r.Body.Close() }()
-	return json.NewDecoder(r.Body).Decode(v)
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	return dec.Decode(v)
 }
 
 // domainErrorToHTTP - переводит ошибку домена в HTTP-код.

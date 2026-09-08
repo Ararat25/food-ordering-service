@@ -122,4 +122,12 @@ func TestCartManage(t *testing.T) {
 		require.NoError(t, svc.Clear(context.Background(), "user-1", "venue-1"))
 		require.Equal(t, []string{"cart-1"}, cart.cleared)
 	})
+
+	t.Run("нулевое количество в сервисе тоже отбивают", func(t *testing.T) {
+		cart, items := cartTestSetup()
+		svc := NewCartService(cart, items)
+		require.ErrorIs(t, svc.UpdateItemQuantity(context.Background(), "user-1", "ci-1", 0), domain.ErrValidation)
+		require.ErrorIs(t, svc.UpdateItemQuantity(context.Background(), "user-1", "ci-1", -2), domain.ErrValidation)
+		require.Empty(t, cart.updatedQty)
+	})
 }

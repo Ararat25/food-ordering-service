@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 
@@ -27,6 +28,9 @@ func (s *MenuService) ListCategories(ctx context.Context, venueID string, page, 
 
 // CreateCategory - создаёт категорию, без id придумывает новый.
 func (s *MenuService) CreateCategory(ctx context.Context, category *domain.MenuCategory) error {
+	if category.Name == "" {
+		return fmt.Errorf("%w: category name is required", domain.ErrValidation)
+	}
 	if category.ID == "" {
 		category.ID = uuid.New().String()
 	}
@@ -43,10 +47,10 @@ func (s *MenuService) DeleteCategory(ctx context.Context, id string) error {
 	return s.categoryRepo.Delete(ctx, id)
 }
 
-// ListItems - возвращает блюда заведения постранично.
-func (s *MenuService) ListItems(ctx context.Context, venueID string, page, perPage int) ([]domain.MenuItem, int, error) {
-	page, perPage = domain.NormalizePagination(page, perPage)
-	return s.itemRepo.ListByVenue(ctx, venueID, page, perPage)
+// ListItems - возвращает блюда заведения с фильтрами.
+func (s *MenuService) ListItems(ctx context.Context, filters domain.MenuItemFilters) ([]domain.MenuItem, int, error) {
+	filters.Page, filters.PerPage = domain.NormalizePagination(filters.Page, filters.PerPage)
+	return s.itemRepo.ListByVenue(ctx, filters)
 }
 
 // GetItem - возвращает блюдо по id.
@@ -56,6 +60,9 @@ func (s *MenuService) GetItem(ctx context.Context, id string) (*domain.MenuItem,
 
 // CreateItem - создаёт блюдо, без id придумывает новый.
 func (s *MenuService) CreateItem(ctx context.Context, item *domain.MenuItem) error {
+	if err := validateItem(item); err != nil {
+		return err
+	}
 	if item.ID == "" {
 		item.ID = uuid.New().String()
 	}
@@ -65,6 +72,9 @@ func (s *MenuService) CreateItem(ctx context.Context, item *domain.MenuItem) err
 
 // UpdateItem - обновляет блюдо, чужое заведение даёт ErrForbidden.
 func (s *MenuService) UpdateItem(ctx context.Context, item *domain.MenuItem) error {
+	if err := validateItem(item); err != nil {
+		return err
+	}
 	existing, err := s.itemRepo.GetByID(ctx, item.ID)
 	if err != nil {
 		return err
@@ -74,6 +84,17 @@ func (s *MenuService) UpdateItem(ctx context.Context, item *domain.MenuItem) err
 	}
 	item.Options = normalizeOptions(item.Options)
 	return s.itemRepo.Update(ctx, item)
+}
+
+// validateItem - имя и неотрицательная цена обязательны.
+func validateItem(item *domain.MenuItem) error {
+	if item.Name == "" {
+		return fmt.Errorf("%w: item name is required", domain.ErrValidation)
+	}
+	if item.Price < 0 {
+		return fmt.Errorf("%w: item price must be >= 0", domain.ErrValidation)
+	}
+	return nil
 }
 
 // DeleteItem - удаляет блюдо, чужое заведение даёт ErrForbidden.

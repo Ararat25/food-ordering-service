@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 
@@ -12,39 +14,60 @@ import (
 // MenuHandler - HTTP для меню, публичная часть и кабинет заведения.
 type MenuHandler struct {
 	menuService domain.MenuService // логика меню
+	logger      *slog.Logger       // куда писать внутренние ошибки
 }
 
 // NewMenuHandler - создаёт хендлер меню.
-func NewMenuHandler(menuService domain.MenuService) *MenuHandler {
-	return &MenuHandler{menuService: menuService}
+func NewMenuHandler(menuService domain.MenuService, logger *slog.Logger) *MenuHandler {
+	return &MenuHandler{menuService: menuService, logger: logger}
 }
 
-// ListItems - отдаёт блюда заведения из контекста постранично, для кабинета.
+// menuFiltersFromQuery - собирает фильтры меню из query: поиск, наличие, пагинация.
+func menuFiltersFromQuery(r *http.Request, venueID string) domain.MenuItemFilters {
+	page, perPage := paginationFromQuery(r)
+
+	var available *bool
+	if raw := r.URL.Query().Get("available"); raw != "" {
+		if parsed, err := strconv.ParseBool(raw); err == nil {
+			available = &parsed
+		}
+	}
+
+	return domain.MenuItemFilters{
+		VenueID:   venueID,
+		Search:    r.URL.Query().Get("search"),
+		Available: available,
+		Page:      page,
+		PerPage:   perPage,
+	}
+}
+
+// ListItems - отдаёт блюда заведения из контекста с фильтрами, для кабинета.
 func (h *MenuHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
-	page, perPage := paginationFromQuery(r)
+	filters := menuFiltersFromQuery(r, venueID)
 
-	items, total, err := h.menuService.ListItems(r.Context(), venueID, page, perPage)
+	items, total, err := h.menuService.ListItems(r.Context(), filters)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
-	writePaginated(w, items, page, perPage, total)
+	writePaginated(w, items, filters.Page, filters.PerPage, total)
 }
 
-// ListByVenuePublic - отдаёт блюда заведения по id из пути постранично, для всех.
+// ListByVenuePublic - отдаёт блюда заведения по id из пути с фильтрами, для всех.
 func (h *MenuHandler) ListByVenuePublic(w http.ResponseWriter, r *http.Request) {
 	venueID := chi.URLParam(r, "id")
-	page, perPage := paginationFromQuery(r)
+	filters := menuFiltersFromQuery(r, venueID)
 
-	items, total, err := h.menuService.ListItems(r.Context(), venueID, page, perPage)
+	items, total, err := h.menuService.ListItems(r.Context(), filters)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
-	writePaginated(w, items, page, perPage, total)
+	writePaginated(w, items, filters.Page, filters.PerPage, total)
 }
 
 // CreateItem - создаёт блюдо в своём заведении.
@@ -52,15 +75,15 @@ func (h *MenuHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	var item domain.MenuItem
-	if err := decodeJSON(r, &item); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &item); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	item.VenueID = venueID
 
 	if err := h.menuService.CreateItem(r.Context(), &item); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -73,8 +96,8 @@ func (h *MenuHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	var item domain.MenuItem
-	if err := decodeJSON(r, &item); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &item); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -82,7 +105,7 @@ func (h *MenuHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 	item.VenueID = venueID
 
 	if err := h.menuService.UpdateItem(r.Context(), &item); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -95,7 +118,7 @@ func (h *MenuHandler) DeleteItem(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	if err := h.menuService.DeleteItem(r.Context(), venueID, itemID); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -110,13 +133,13 @@ func (h *MenuHandler) UpdateAvailability(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Available bool `json:"available"` // новое наличие
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if err := h.menuService.UpdateAvailability(r.Context(), venueID, itemID, req.Available); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -130,7 +153,7 @@ func (h *MenuHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
 
 	categories, total, err := h.menuService.ListCategories(r.Context(), venueID, page, perPage)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -142,15 +165,15 @@ func (h *MenuHandler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	var cat domain.MenuCategory
-	if err := decodeJSON(r, &cat); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &cat); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	cat.VenueID = venueID
 
 	if err := h.menuService.CreateCategory(r.Context(), &cat); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 

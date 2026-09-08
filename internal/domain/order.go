@@ -40,6 +40,7 @@ type Order struct {
 	EstimatedDeliveryTime *time.Time   `json:"estimated_delivery_time" db:"estimated_delivery_time"` // когда обещаем доставить
 	Comment               string       `json:"comment" db:"comment"`                                 // комментарий клиента
 	TotalAmount           int64        `json:"total_amount" db:"total_amount"`                       // итоговая сумма в копейках
+	IdempotencyKey        string       `json:"-" db:"idempotency_key"`                               // ключ идемпотентности, наружу не отдаём
 	Items                 []OrderItem  `json:"items"`                                                // позиции заказа, подгружаются отдельно
 	CreatedAt             time.Time    `json:"created_at" db:"created_at"`                           // когда создан
 	UpdatedAt             time.Time    `json:"updated_at" db:"updated_at"`                           // когда обновлён

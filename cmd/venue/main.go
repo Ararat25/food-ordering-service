@@ -10,33 +10,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 	"time"
+
+	"avito-kitchen/internal/config"
+	"avito-kitchen/internal/domain"
 )
-
-// Config - настройки venue-сервиса.
-type Config struct {
-	Port       int    // свой порт
-	APIKey     string // ключ заведения для основного API
-	MainAPIURL string // адрес основного сервиса
-}
-
-// loadConfig - читает настройки из env.
-func loadConfig() *Config {
-	port := 8081
-	if p := os.Getenv("VENUE_SERVICE_PORT"); p != "" {
-		if n, err := strconv.Atoi(p); err == nil {
-			port = n
-		}
-	}
-
-	return &Config{
-		Port:       port,
-		APIKey:     os.Getenv("VENUE_API_KEY"),
-		MainAPIURL: os.Getenv("MAIN_API_URL"),
-	}
-}
 
 // OrderStatusUpdate - смена статуса заказа для вебхука.
 type OrderStatusUpdate struct {
@@ -52,11 +31,11 @@ type apiClient struct {
 }
 
 // newAPIClient - создаёт клиента к основному сервису.
-func newAPIClient(baseURL, apiKey string) *apiClient {
+func newAPIClient(baseURL, apiKey string, timeout time.Duration) *apiClient {
 	return &apiClient{
 		baseURL: baseURL,
 		apiKey:  apiKey,
-		client:  &http.Client{Timeout: 10 * time.Second},
+		client:  &http.Client{Timeout: timeout},
 	}
 }
 
@@ -132,14 +111,14 @@ func syncOnce(ctx context.Context, logger *slog.Logger, client orderSyncer) {
 
 	pending := 0
 	for _, o := range orders {
-		if o.Status == "pending" {
+		if o.Status == string(domain.OrderStatusPending) {
 			pending++
 		}
 	}
 	logger.Info("venue sync: orders fetched", "total", len(orders), "pending", pending)
 
 	for _, o := range orders {
-		if o.Status != "pending" {
+		if o.Status != string(domain.OrderStatusPending) {
 			continue
 		}
 		if err := client.acceptOrder(ctx, o.ID); err != nil {
@@ -172,7 +151,11 @@ func main() {
 		Level: slog.LevelInfo,
 	}))
 
-	cfg := loadConfig()
+	cfg, err := config.LoadVenue()
+	if err != nil {
+		logger.Error("venue service failed to load config", "error", err)
+		os.Exit(1)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -180,7 +163,7 @@ func main() {
 	if cfg.MainAPIURL == "" || cfg.APIKey == "" {
 		logger.Warn("venue sync disabled: MAIN_API_URL or VENUE_API_KEY is not set")
 	} else {
-		go pollLoop(ctx, logger, newAPIClient(cfg.MainAPIURL, cfg.APIKey), 30*time.Second)
+		go pollLoop(ctx, logger, newAPIClient(cfg.MainAPIURL, cfg.APIKey, cfg.RequestTimeout), cfg.PollInterval)
 	}
 
 	mux := http.NewServeMux()

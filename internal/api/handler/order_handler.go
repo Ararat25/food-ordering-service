@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -12,30 +13,32 @@ import (
 // OrderHandler - обработчик для заказов, пользовательская часть и кабинет заведения.
 type OrderHandler struct {
 	orderService domain.OrderService // логика заказов
+	logger       *slog.Logger        // куда писать внутренние ошибки
 }
 
 // NewOrderHandler - создаёт хендлер заказов.
-func NewOrderHandler(orderService domain.OrderService) *OrderHandler {
-	return &OrderHandler{orderService: orderService}
+func NewOrderHandler(orderService domain.OrderService, logger *slog.Logger) *OrderHandler {
+	return &OrderHandler{orderService: orderService, logger: logger}
 }
 
 // Create - создаёт заказ из корзины пользователя.
 func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
 	var req domain.CreateOrderRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	req.IdempotencyKey = r.Header.Get("Idempotency-Key")
 
 	order, err := h.orderService.Create(r.Context(), userID, req)
 	if err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -46,7 +49,7 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
@@ -54,7 +57,7 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	orders, total, err := h.orderService.ListByUser(r.Context(), userID, page, perPage)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -67,7 +70,7 @@ func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.orderService.GetByID(r.Context(), id)
 	if err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -80,7 +83,7 @@ func (h *OrderHandler) Track(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.orderService.GetByID(r.Context(), id)
 	if err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -97,7 +100,7 @@ func (h *OrderHandler) Track(w http.ResponseWriter, r *http.Request) {
 func (h *OrderHandler) Repeat(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
@@ -105,7 +108,7 @@ func (h *OrderHandler) Repeat(w http.ResponseWriter, r *http.Request) {
 
 	order, err := h.orderService.Repeat(r.Context(), userID, orderID)
 	if err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -120,7 +123,7 @@ func (h *OrderHandler) VenueList(w http.ResponseWriter, r *http.Request) {
 
 	orders, total, err := h.orderService.ListByVenue(r.Context(), venueID, status, page, perPage)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -133,7 +136,7 @@ func (h *OrderHandler) VenueAccept(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	if err := h.orderService.UpdateVenueOrderStatus(r.Context(), venueID, orderID, domain.OrderStatusAccepted); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -146,7 +149,7 @@ func (h *OrderHandler) VenueReject(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 
 	if err := h.orderService.UpdateVenueOrderStatus(r.Context(), venueID, orderID, domain.OrderStatusCancelled); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -161,13 +164,13 @@ func (h *OrderHandler) VenueUpdateStatus(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Status string `json:"status"` // новый статус
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if err := h.orderService.UpdateVenueOrderStatus(r.Context(), venueID, orderID, domain.OrderStatus(req.Status)); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 

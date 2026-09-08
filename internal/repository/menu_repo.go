@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	sq "github.com/Masterminds/squirrel"
 	"github.com/lib/pq"
@@ -155,12 +156,24 @@ func (r *MenuCategoryRepo) Delete(ctx context.Context, id string) error {
 
 // MenuItemRepo - блюда в базе данных.
 type MenuItemRepo struct {
-	db *sql.DB // соединение с базой
+	db DBTX // соединение или транзакция
 }
 
 // NewMenuItemRepo - создаёт репозиторий блюд.
 func NewMenuItemRepo(db *sql.DB) *MenuItemRepo {
 	return &MenuItemRepo{db: db}
+}
+
+// MenuItemRepo обещает выполнять контракт MenuItemRepository.
+var _ domain.MenuItemRepository = (*MenuItemRepo)(nil)
+
+// WithTx - возвращает копию репозитория, пишущую в заданную транзакцию.
+func (r *MenuItemRepo) WithTx(tx domain.Tx) domain.MenuItemRepository {
+	sqlTx, ok := tx.(*sql.Tx)
+	if !ok {
+		panic("repository: WithTx supports only *sql.Tx transactions")
+	}
+	return &MenuItemRepo{db: sqlTx}
 }
 
 // Create - сохраняет новое блюдо.
@@ -243,10 +256,69 @@ func (r *MenuItemRepo) GetByIDs(ctx context.Context, ids []string) ([]domain.Men
 	return items, nil
 }
 
-// ListByVenue - возвращает блюда заведения по алфавиту плюс общее число.
-func (r *MenuItemRepo) ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]domain.MenuItem, int, error) {
-	countQuery, countArgs, err := sb.Select("COUNT(*)").From("menu_items").
-		Where(sq.Eq{"venue_id": venueID}).ToSql()
+// GetByIDsForUpdate - та же пачка, но с локой строк: между проверкой наличия
+// и созданием заказа блюдо никто не снимет с продажи. Вне транзакции лока
+// тут же отпускается, так что метод имеет смысл только на WithTx-копии.
+func (r *MenuItemRepo) GetByIDsForUpdate(ctx context.Context, ids []string) ([]domain.MenuItem, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+
+	query, args, err := sb.Select(menuItemColumns...).From("menu_items").
+		Where(sq.Eq{"id": ids}).
+		Suffix("FOR UPDATE").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	rows, err := r.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list menu items by ids: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var items []domain.MenuItem
+	for rows.Next() {
+		var item domain.MenuItem
+		if err := rows.Scan(
+			&item.ID, &item.CategoryID, &item.VenueID, &item.Name, &item.Description,
+			&item.Price, &item.ImageURL, &item.IsAvailable, &item.Options,
+			&item.CreatedAt, &item.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan menu item: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate menu items by ids: %w", err)
+	}
+
+	return items, nil
+}
+
+// ListByVenue - возвращает блюда заведения с фильтрами плюс общее число.
+func (r *MenuItemRepo) ListByVenue(ctx context.Context, filters domain.MenuItemFilters) ([]domain.MenuItem, int, error) {
+	baseQuery := sb.Select(menuItemColumns...).From("menu_items").Where(sq.Eq{"venue_id": filters.VenueID})
+	countBaseQuery := sb.Select("COUNT(*)").From("menu_items").Where(sq.Eq{"venue_id": filters.VenueID})
+
+	if filters.Search != "" {
+		search := "%" + strings.ToLower(filters.Search) + "%"
+		condition := sq.Or{
+			sq.Like{"LOWER(name)": search},
+			sq.Like{"LOWER(description)": search},
+		}
+		baseQuery = baseQuery.Where(condition)
+		countBaseQuery = countBaseQuery.Where(condition)
+	}
+
+	if filters.Available != nil {
+		baseQuery = baseQuery.Where(sq.Eq{"is_available": *filters.Available})
+		countBaseQuery = countBaseQuery.Where(sq.Eq{"is_available": *filters.Available})
+	}
+
+	countQuery, countArgs, err := countBaseQuery.ToSql()
 	if err != nil {
 		return nil, 0, fmt.Errorf("build count query: %w", err)
 	}
@@ -256,11 +328,10 @@ func (r *MenuItemRepo) ListByVenue(ctx context.Context, venueID string, page, pe
 		return nil, 0, fmt.Errorf("count menu items: %w", err)
 	}
 
-	offset := (page - 1) * perPage
-	query, args, err := sb.Select(menuItemColumns...).From("menu_items").
-		Where(sq.Eq{"venue_id": venueID}).
+	offset := (filters.Page - 1) * filters.PerPage
+	query, args, err := baseQuery.
 		OrderBy("name ASC").
-		Limit(uint64(perPage)).
+		Limit(uint64(filters.PerPage)).
 		Offset(uint64(offset)).
 		ToSql()
 	if err != nil {

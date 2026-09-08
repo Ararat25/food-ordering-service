@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"database/sql"
+
+	"avito-kitchen/internal/domain"
 )
 
 type DBTX interface {
@@ -19,6 +21,6 @@ func NewTransactor(db *sql.DB) *Transactor {
 	return &Transactor{db: db}
 }
 
-func (t *Transactor) BeginTx(ctx context.Context) (*sql.Tx, error) {
+func (t *Transactor) BeginTx(ctx context.Context) (domain.Tx, error) {
 	return t.db.BeginTx(ctx, nil)
 }

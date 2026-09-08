@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,18 +12,19 @@ import (
 // ReviewHandler - HTTP для отзывов.
 type ReviewHandler struct {
 	reviewService domain.ReviewService // логика отзывов
+	logger        *slog.Logger         // куда писать внутренние ошибки
 }
 
 // NewReviewHandler - создаёт хендлер отзывов.
-func NewReviewHandler(reviewService domain.ReviewService) *ReviewHandler {
-	return &ReviewHandler{reviewService: reviewService}
+func NewReviewHandler(reviewService domain.ReviewService, logger *slog.Logger) *ReviewHandler {
+	return &ReviewHandler{reviewService: reviewService, logger: logger}
 }
 
 // Create - оставляет отзыв о заведении по id из пути.
 func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
@@ -33,8 +35,8 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Rating  int    `json:"rating"`   // оценка
 		Comment string `json:"comment"`  // текст отзыва
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -43,7 +45,7 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Comment: req.Comment,
 	})
 	if err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -57,7 +59,7 @@ func (h *ReviewHandler) ListByVenue(w http.ResponseWriter, r *http.Request) {
 
 	reviews, total, err := h.reviewService.ListByVenue(r.Context(), venueID, page, perPage)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 

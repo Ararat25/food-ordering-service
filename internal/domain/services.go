@@ -16,7 +16,7 @@ type MenuService interface {
 	CreateCategory(ctx context.Context, category *MenuCategory) error                                   // создать категорию
 	UpdateCategory(ctx context.Context, category *MenuCategory) error                                   // обновить категорию
 	DeleteCategory(ctx context.Context, id string) error                                                // удалить категорию
-	ListItems(ctx context.Context, venueID string, page, perPage int) ([]MenuItem, int, error)          // блюда заведения постранично
+	ListItems(ctx context.Context, filters MenuItemFilters) ([]MenuItem, int, error)                    // блюда заведения с фильтрами
 	GetItem(ctx context.Context, id string) (*MenuItem, error)                                          // одно блюдо по id
 	CreateItem(ctx context.Context, item *MenuItem) error                                               // создать блюдо
 	UpdateItem(ctx context.Context, item *MenuItem) error                                               // обновить блюдо

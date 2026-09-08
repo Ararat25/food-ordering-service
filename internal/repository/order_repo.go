@@ -25,8 +25,12 @@ func NewOrderRepo(db *sql.DB) *OrderRepo {
 }
 
 // WithTx - возвращает копию репозитория, пишущую в заданную транзакцию.
-func (r *OrderRepo) WithTx(tx *sql.Tx) domain.OrderRepository {
-	return &OrderRepo{db: tx}
+func (r *OrderRepo) WithTx(tx domain.Tx) domain.OrderRepository {
+	sqlTx, ok := tx.(*sql.Tx)
+	if !ok {
+		panic("repository: WithTx supports only *sql.Tx transactions")
+	}
+	return &OrderRepo{db: sqlTx}
 }
 
 // Create - сохраняет заказ без позиций.
@@ -52,10 +56,10 @@ func (r *OrderRepo) Create(ctx context.Context, order *domain.Order) error {
 }
 
 // CreateWithItems - сохраняет заказ с позициями и платежом.
-func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, items []domain.OrderItem) error {
+func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, items []domain.OrderItem, paymentMethod string) error {
 	db, ok := r.db.(*sql.DB)
 	if !ok {
-		return r.insertOrderWithItems(ctx, r.db, order, items)
+		return r.insertOrderWithItems(ctx, r.db, order, items, paymentMethod)
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
@@ -64,22 +68,30 @@ func (r *OrderRepo) CreateWithItems(ctx context.Context, order *domain.Order, it
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := r.insertOrderWithItems(ctx, tx, order, items); err != nil {
+	if err := r.insertOrderWithItems(ctx, tx, order, items, paymentMethod); err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
 
+// idempotencyValue - пустой ключ пишет как NULL, иначе ” конфликтовал бы в уникальном индексе.
+func idempotencyValue(key string) any {
+	if key == "" {
+		return nil
+	}
+	return key
+}
+
 // insertOrderWithItems - пишет заказ, позиции и платёж в заданный DBTX.
-func (r *OrderRepo) insertOrderWithItems(ctx context.Context, q DBTX, order *domain.Order, items []domain.OrderItem) error {
+func (r *OrderRepo) insertOrderWithItems(ctx context.Context, q DBTX, order *domain.Order, items []domain.OrderItem, paymentMethod string) error {
 	orderQuery, orderArgs, err := sb.Insert("orders").
 		Columns("id", "user_id", "venue_id", "status", "delivery_type",
 			"delivery_address", "delivery_time", "estimated_delivery_time",
-			"comment", "total_amount").
+			"comment", "total_amount", "idempotency_key").
 		Values(order.ID, order.UserID, order.VenueID, order.Status, order.DeliveryType,
 			order.DeliveryAddress, order.DeliveryTime, order.EstimatedDeliveryTime,
-			order.Comment, order.TotalAmount).
+			order.Comment, order.TotalAmount, idempotencyValue(order.IdempotencyKey)).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build order query: %w", err)
@@ -105,7 +117,7 @@ func (r *OrderRepo) insertOrderWithItems(ctx context.Context, q DBTX, order *dom
 
 	paymentQuery, paymentArgs, err := sb.Insert("payments").
 		Columns("id", "order_id", "status", "amount", "method").
-		Values(uuid.New().String(), order.ID, domain.PaymentStatusPending, order.TotalAmount, "card").
+		Values(uuid.New().String(), order.ID, domain.PaymentStatusPending, order.TotalAmount, paymentMethod).
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build payment query: %w", err)
@@ -118,6 +130,45 @@ func (r *OrderRepo) insertOrderWithItems(ctx context.Context, q DBTX, order *dom
 	return nil
 }
 
+// rowScanner - общее для *sql.Row и *sql.Rows: умеет Scan.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanOrder - читает заказ из строки, NULL-ключ идемпотентности превращает в пустую строку.
+func scanOrder(s rowScanner, order *domain.Order) error {
+	var key sql.NullString
+	err := s.Scan(
+		&order.ID, &order.UserID, &order.VenueID, &order.Status, &order.DeliveryType,
+		&order.DeliveryAddress, &order.DeliveryTime, &order.EstimatedDeliveryTime,
+		&order.Comment, &order.TotalAmount, &order.CreatedAt, &order.UpdatedAt, &key,
+	)
+	if err != nil {
+		return err
+	}
+	order.IdempotencyKey = key.String
+	return nil
+}
+
+// GetByIdempotencyKey - находит заказ по ключу идемпотентности, нет такого — ErrNotFound.
+func (r *OrderRepo) GetByIdempotencyKey(ctx context.Context, key string) (*domain.Order, error) {
+	query, args, err := sb.Select(orderColumns...).From("orders").Where(sq.Eq{"idempotency_key": key}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+
+	var order domain.Order
+	err = scanOrder(r.db.QueryRowContext(ctx, query, args...), &order)
+	if err == sql.ErrNoRows {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get order by idempotency key: %w", err)
+	}
+
+	return &order, nil
+}
+
 // GetByID - находит заказ по id.
 func (r *OrderRepo) GetByID(ctx context.Context, id string) (*domain.Order, error) {
 	query, args, err := sb.Select(orderColumns...).From("orders").Where(sq.Eq{"id": id}).ToSql()
@@ -126,11 +177,7 @@ func (r *OrderRepo) GetByID(ctx context.Context, id string) (*domain.Order, erro
 	}
 
 	var order domain.Order
-	err = r.db.QueryRowContext(ctx, query, args...).Scan(
-		&order.ID, &order.UserID, &order.VenueID, &order.Status, &order.DeliveryType,
-		&order.DeliveryAddress, &order.DeliveryTime, &order.EstimatedDeliveryTime,
-		&order.Comment, &order.TotalAmount, &order.CreatedAt, &order.UpdatedAt,
-	)
+	err = scanOrder(r.db.QueryRowContext(ctx, query, args...), &order)
 	if err == sql.ErrNoRows {
 		return nil, domain.ErrNotFound
 	}
@@ -174,11 +221,7 @@ func (r *OrderRepo) ListByUser(ctx context.Context, userID string, page, perPage
 	var orders []domain.Order
 	for rows.Next() {
 		var o domain.Order
-		if err := rows.Scan(
-			&o.ID, &o.UserID, &o.VenueID, &o.Status, &o.DeliveryType,
-			&o.DeliveryAddress, &o.DeliveryTime, &o.EstimatedDeliveryTime,
-			&o.Comment, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
-		); err != nil {
+		if err := scanOrder(rows, &o); err != nil {
 			return nil, 0, fmt.Errorf("scan order: %w", err)
 		}
 		orders = append(orders, o)
@@ -227,11 +270,7 @@ func (r *OrderRepo) ListByVenue(ctx context.Context, venueID string, status stri
 	var orders []domain.Order
 	for rows.Next() {
 		var o domain.Order
-		if err := rows.Scan(
-			&o.ID, &o.UserID, &o.VenueID, &o.Status, &o.DeliveryType,
-			&o.DeliveryAddress, &o.DeliveryTime, &o.EstimatedDeliveryTime,
-			&o.Comment, &o.TotalAmount, &o.CreatedAt, &o.UpdatedAt,
-		); err != nil {
+		if err := scanOrder(rows, &o); err != nil {
 			return nil, 0, fmt.Errorf("scan order: %w", err)
 		}
 		orders = append(orders, o)

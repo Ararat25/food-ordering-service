@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -11,30 +12,31 @@ import (
 // CartHandler - обработчик для корзины.
 type CartHandler struct {
 	cartService domain.CartService // логика корзины
+	logger      *slog.Logger       // куда писать внутренние ошибки
 }
 
 // NewCartHandler - создаёт хендлер корзины.
-func NewCartHandler(cartService domain.CartService) *CartHandler {
-	return &CartHandler{cartService: cartService}
+func NewCartHandler(cartService domain.CartService, logger *slog.Logger) *CartHandler {
+	return &CartHandler{cartService: cartService, logger: logger}
 }
 
 // Get - отдаёт корзину пользователя в заведении из query.
 func (h *CartHandler) Get(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
 	venueID := r.URL.Query().Get("venue_id")
 	if venueID == "" {
-		writeError(w, http.StatusBadRequest, "venue_id query parameter required")
+		writeError(w, r, http.StatusBadRequest, "venue_id query parameter required")
 		return
 	}
 
 	cart, err := h.cartService.GetCart(r.Context(), userID, venueID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -45,19 +47,19 @@ func (h *CartHandler) Get(w http.ResponseWriter, r *http.Request) {
 func (h *CartHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
 	venueID := r.URL.Query().Get("venue_id")
 	if venueID == "" {
-		writeError(w, http.StatusBadRequest, "venue_id query parameter required")
+		writeError(w, r, http.StatusBadRequest, "venue_id query parameter required")
 		return
 	}
 
 	var req domain.AddToCartRequest
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
@@ -67,7 +69,7 @@ func (h *CartHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 
 	cart, err := h.cartService.AddItem(r.Context(), userID, venueID, req)
 	if err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -78,7 +80,7 @@ func (h *CartHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 func (h *CartHandler) UpdateItemQuantity(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
@@ -87,18 +89,18 @@ func (h *CartHandler) UpdateItemQuantity(w http.ResponseWriter, r *http.Request)
 	var req struct {
 		Quantity int `json:"quantity"` // новое количество
 	}
-	if err := decodeJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if err := decodeJSON(w, r, &req); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	if req.Quantity <= 0 {
-		writeError(w, http.StatusBadRequest, "quantity must be > 0")
+		writeError(w, r, http.StatusBadRequest, "quantity must be > 0")
 		return
 	}
 
 	if err := h.cartService.UpdateItemQuantity(r.Context(), userID, itemID, req.Quantity); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -109,14 +111,14 @@ func (h *CartHandler) UpdateItemQuantity(w http.ResponseWriter, r *http.Request)
 func (h *CartHandler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
 	itemID := chi.URLParam(r, "id")
 
 	if err := h.cartService.RemoveItem(r.Context(), userID, itemID); err != nil {
-		writeError(w, domainErrorToHTTP(err), err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 
@@ -127,18 +129,18 @@ func (h *CartHandler) RemoveItem(w http.ResponseWriter, r *http.Request) {
 func (h *CartHandler) Clear(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
-		writeError(w, http.StatusUnauthorized, "X-User-ID header required")
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
 		return
 	}
 
 	venueID := r.URL.Query().Get("venue_id")
 	if venueID == "" {
-		writeError(w, http.StatusBadRequest, "venue_id query parameter required")
+		writeError(w, r, http.StatusBadRequest, "venue_id query parameter required")
 		return
 	}
 
 	if err := h.cartService.Clear(r.Context(), userID, venueID); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		writeServiceError(w, r, h.logger, err)
 		return
 	}
 

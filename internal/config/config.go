@@ -17,6 +17,9 @@ const (
 	defaultDBMaxIdleTime  = 3 * time.Minute  // сколько простаивает соединение с БД
 	defaultDBMaxOpenConns = 25               // максимум открытых соединений
 	defaultDBMaxIdleConns = 10               // максимум простаивающих соединений
+	defaultVenuePort      = 8081             // порт симулятора заведения
+	defaultVenueInterval  = 30 * time.Second // как часто симулятор опрашивает заказы
+	defaultVenueTimeout   = 10 * time.Second // таймаут запросов симулятора
 )
 
 // Config - все настройки приложения.
@@ -40,6 +43,36 @@ type DatabaseConfig struct {
 	MaxIdleConns    int           // максимум простаивающих соединений
 	ConnMaxLifetime time.Duration // сколько живёт соединение
 	ConnMaxIdleTime time.Duration // сколько простаивает соединение
+}
+
+// VenueConfig - настройки симулятора заведения.
+type VenueConfig struct {
+	Port           int           // свой порт
+	APIKey         string        // ключ заведения для основного API
+	MainAPIURL     string        // адрес основного сервиса
+	PollInterval   time.Duration // как часто опрашивать заказы
+	RequestTimeout time.Duration // таймаут запросов к основному API
+}
+
+// LoadVenue - читает настройки симулятора из env.
+func LoadVenue() (*VenueConfig, error) {
+	cfg := &VenueConfig{}
+
+	var err error
+	if cfg.Port, err = getEnvInt("VENUE_SERVICE_PORT", defaultVenuePort); err != nil {
+		return nil, err
+	}
+	if cfg.PollInterval, err = getEnvDuration("VENUE_POLL_INTERVAL", defaultVenueInterval); err != nil {
+		return nil, err
+	}
+	if cfg.RequestTimeout, err = getEnvDuration("VENUE_REQUEST_TIMEOUT", defaultVenueTimeout); err != nil {
+		return nil, err
+	}
+
+	cfg.APIKey = getEnvStr("VENUE_API_KEY", "")
+	cfg.MainAPIURL = getEnvStr("MAIN_API_URL", "")
+
+	return cfg, nil
 }
 
 // Load - читает настройки из env, обязательные без значения дают ошибку.
