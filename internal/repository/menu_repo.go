@@ -64,6 +64,24 @@ func (r *MenuCategoryRepo) GetByID(ctx context.Context, id string) (*domain.Menu
 	return &cat, nil
 }
 
+// GetByIDForVenue - ищет категорию одновременно по ID и владельцу.
+func (r *MenuCategoryRepo) GetByIDForVenue(ctx context.Context, id, venueID string) (*domain.MenuCategory, error) {
+	query, args, err := sb.Select(menuCategoryColumns...).From("menu_categories").
+		Where(sq.Eq{"id": id, "venue_id": venueID}).ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("build query: %w", err)
+	}
+	var cat domain.MenuCategory
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(&cat.ID, &cat.VenueID, &cat.Name, &cat.SortOrder, &cat.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get venue category: %w", err)
+	}
+	return &cat, nil
+}
+
 // ListByVenue - возвращает категории заведения по порядку показа плюс общее число.
 func (r *MenuCategoryRepo) ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]domain.MenuCategory, int, error) {
 	countQuery, countArgs, err := sb.Select("COUNT(*)").From("menu_categories").

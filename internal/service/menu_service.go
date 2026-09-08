@@ -63,6 +63,15 @@ func (s *MenuService) CreateItem(ctx context.Context, item *domain.MenuItem) err
 	if err := validateItem(item); err != nil {
 		return err
 	}
+	if _, err := parseMenuOptions(item.Options); err != nil {
+		return err
+	}
+	if item.CategoryID == "" || item.VenueID == "" {
+		return fmt.Errorf("%w: category_id and venue_id are required", domain.ErrValidation)
+	}
+	if _, err := s.categoryRepo.GetByIDForVenue(ctx, item.CategoryID, item.VenueID); err != nil {
+		return fmt.Errorf("category does not belong to venue: %w", err)
+	}
 	if item.ID == "" {
 		item.ID = uuid.New().String()
 	}
@@ -73,6 +82,9 @@ func (s *MenuService) CreateItem(ctx context.Context, item *domain.MenuItem) err
 // UpdateItem - обновляет блюдо, чужое заведение даёт ErrForbidden.
 func (s *MenuService) UpdateItem(ctx context.Context, item *domain.MenuItem) error {
 	if err := validateItem(item); err != nil {
+		return err
+	}
+	if _, err := parseMenuOptions(item.Options); err != nil {
 		return err
 	}
 	existing, err := s.itemRepo.GetByID(ctx, item.ID)

@@ -42,3 +42,8 @@ func (s *NotificationService) RegisterPushToken(ctx context.Context, token *doma
 	}
 	return s.tokenRepo.Register(ctx, token)
 }
+
+// UnregisterPushToken - отзывает токен устройства только у его владельца.
+func (s *NotificationService) UnregisterPushToken(ctx context.Context, userID, token string) error {
+	return s.tokenRepo.DeleteForUser(ctx, userID, token)
+}

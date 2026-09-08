@@ -31,6 +31,10 @@ func parseLogLevel(s string) slog.Level {
 }
 
 func main() {
+	if err := config.LoadDotEnv(); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to load .env: %v\n", err)
+		os.Exit(1)
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config: %v\n", err)

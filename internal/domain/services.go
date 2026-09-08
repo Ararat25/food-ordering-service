@@ -37,6 +37,8 @@ type CartService interface {
 type OrderService interface {
 	Create(ctx context.Context, userID string, req CreateOrderRequest) (*Order, error)                       // создать заказ из корзины
 	GetByID(ctx context.Context, id string) (*Order, error)                                                  // один по id
+	GetByUser(ctx context.Context, userID, id string) (*Order, error)                                        // детали заказа пользователя с позициями
+	GetByVenue(ctx context.Context, venueID, id string) (*Order, error)                                      // детали заказа заведения с позициями
 	ListByUser(ctx context.Context, userID string, page, perPage int) ([]Order, int, error)                  // заказы пользователя
 	ListByVenue(ctx context.Context, venueID string, status string, page, perPage int) ([]Order, int, error) // заказы заведения
 	UpdateStatus(ctx context.Context, id string, status OrderStatus) error                                   // сменить статус
@@ -57,4 +59,5 @@ type NotificationService interface {
 	ListByUser(ctx context.Context, userID string, page, perPage int) ([]Notification, int, error) // уведомления пользователя
 	MarkAsRead(ctx context.Context, id string) error                                               // пометить прочитанным
 	RegisterPushToken(ctx context.Context, token *PushToken) error                                 // сохранить пуш-токен
+	UnregisterPushToken(ctx context.Context, userID, token string) error                           // отозвать собственный push token
 }

@@ -28,6 +28,7 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 	reviewRepo := repository.NewReviewRepo(db)
 	notifRepo := repository.NewNotificationRepo(db)
 	pushTokenRepo := repository.NewPushTokenRepo(db)
+	userRepo := repository.NewUserRepo(db)
 
 	venueService := service.NewVenueService(venueRepo)
 	menuService := service.NewMenuService(menuCategoryRepo, menuItemRepo)
@@ -52,10 +53,10 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 		r.Get("/venues/{id}", venueHandler.GetByID)
 		r.Get("/venues/{id}/menu", menuHandler.ListByVenuePublic)
 		r.Get("/venues/{id}/reviews", reviewHandler.ListByVenue)
-		r.Post("/venues/{id}/reviews", reviewHandler.Create)
+		r.With(middleware.UserAuth(userRepo)).Post("/venues/{id}/reviews", reviewHandler.Create)
 
 		r.Route("/cart", func(r chi.Router) {
-			r.Use(middleware.UserAuth)
+			r.Use(middleware.UserAuth(userRepo))
 			r.Get("/", cartHandler.Get)
 			r.Post("/items", cartHandler.AddItem)
 			r.Put("/items/{id}", cartHandler.UpdateItemQuantity)
@@ -64,7 +65,7 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 		})
 
 		r.Route("/orders", func(r chi.Router) {
-			r.Use(middleware.UserAuth)
+			r.Use(middleware.UserAuth(userRepo))
 			r.Post("/", orderHandler.Create)
 			r.Get("/", orderHandler.List)
 			r.Get("/{id}", orderHandler.GetByID)
@@ -73,8 +74,9 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 		})
 
 		r.Route("/notifications", func(r chi.Router) {
-			r.Use(middleware.UserAuth)
+			r.Use(middleware.UserAuth(userRepo))
 			r.Post("/register", notifHandler.RegisterToken)
+			r.Delete("/register", notifHandler.DeleteToken)
 			r.Get("/", notifHandler.List)
 		})
 	})
@@ -86,6 +88,7 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 			r.Get("/", menuHandler.ListItems)
 			r.Post("/", menuHandler.CreateItem)
 			r.Get("/categories", menuHandler.ListCategories)
+			r.Post("/categories", menuHandler.CreateCategory)
 			r.Put("/{id}", menuHandler.UpdateItem)
 			r.Delete("/{id}", menuHandler.DeleteItem)
 			r.Patch("/{id}/availability", menuHandler.UpdateAvailability)
@@ -93,7 +96,7 @@ func New(db *sql.DB, logger *slog.Logger) *chi.Mux {
 
 		r.Route("/orders", func(r chi.Router) {
 			r.Get("/", orderHandler.VenueList)
-			r.Get("/{id}", orderHandler.GetByID)
+			r.Get("/{id}", orderHandler.VenueGetByID)
 			r.Patch("/{id}/accept", orderHandler.VenueAccept)
 			r.Patch("/{id}/reject", orderHandler.VenueReject)
 			r.Patch("/{id}/status", orderHandler.VenueUpdateStatus)

@@ -36,7 +36,7 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Comment string `json:"comment"`  // текст отзыва
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 
@@ -55,7 +55,11 @@ func (h *ReviewHandler) Create(w http.ResponseWriter, r *http.Request) {
 // ListByVenue - отдаёт отзывы заведения постранично.
 func (h *ReviewHandler) ListByVenue(w http.ResponseWriter, r *http.Request) {
 	venueID := chi.URLParam(r, "id")
-	page, perPage := paginationFromQuery(r)
+	page, perPage, err := paginationFromQuery(r)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	reviews, total, err := h.reviewService.ListByVenue(r.Context(), venueID, page, perPage)
 	if err != nil {

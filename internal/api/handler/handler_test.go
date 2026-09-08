@@ -44,6 +44,14 @@ func (s *stubOrderService) GetByID(_ context.Context, _ string) (*domain.Order, 
 	return s.order, s.err
 }
 
+func (s *stubOrderService) GetByUser(_ context.Context, _, _ string) (*domain.Order, error) {
+	return s.order, s.err
+}
+
+func (s *stubOrderService) GetByVenue(_ context.Context, _, _ string) (*domain.Order, error) {
+	return s.order, s.err
+}
+
 func (s *stubOrderService) ListByUser(_ context.Context, _ string, _, _ int) ([]domain.Order, int, error) {
 	return nil, 0, s.err
 }
@@ -284,7 +292,7 @@ func TestMenuListHandler(t *testing.T) {
 		require.True(t, *svc.got.Available)
 	})
 
-	t.Run("кривая пагинация чинится дефолтами", func(t *testing.T) {
+	t.Run("кривая пагинация отклоняется", func(t *testing.T) {
 		svc := &stubMenuService{}
 		h := NewMenuHandler(svc, testLogger())
 
@@ -293,10 +301,8 @@ func TestMenuListHandler(t *testing.T) {
 
 		h.ListItems(w, withRequestID(r))
 
-		require.Equal(t, http.StatusOK, w.Code)
-		require.Equal(t, domain.DefaultPage, svc.got.Page)
-		require.Equal(t, domain.DefaultPerPage, svc.got.PerPage)
-		require.Nil(t, svc.got.Available)
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.Zero(t, svc.got.Page)
 	})
 }
 
@@ -328,4 +334,58 @@ func TestCartAddHandler(t *testing.T) {
 
 		require.Equal(t, http.StatusBadRequest, w.Code)
 	})
+}
+
+func TestDecodeJSONRejectsTrailingValueAndOversizedBody(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Value string `json:"value"`
+		}
+		if err := decodeJSON(w, r, &payload); err != nil {
+			writeDecodeError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, payload)
+	})
+
+	t.Run("trailing JSON value", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"value":"one"} {"value":"two"}`))
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, withRequestID(r))
+		require.Equal(t, http.StatusBadRequest, w.Code)
+		require.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	})
+
+	t.Run("body over 1 MiB", func(t *testing.T) {
+		body := `{"value":"` + strings.Repeat("x", maxBodyBytes) + `"}`
+		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, withRequestID(r))
+		require.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
+		require.Equal(t, "application/json", w.Header().Get("Content-Type"))
+	})
+}
+
+func TestMenuQueryRejectsInvalidAvailable(t *testing.T) {
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/venues/venue-1/menu?available=notabool", nil)
+	_, err := menuFiltersFromQuery(r, "venue-1")
+	require.ErrorIs(t, err, domain.ErrValidation)
+}
+
+func TestPaginationFromQueryRejectsInvalidAndOutOfRangeValues(t *testing.T) {
+	for _, target := range []string{
+		"/?page=abc",
+		"/?page=0",
+		"/?page=999999999999999999999999",
+		"/?per_page=0",
+		"/?per_page=101",
+	} {
+		r := httptest.NewRequest(http.MethodGet, target, nil)
+		_, _, err := paginationFromQuery(r)
+		require.ErrorIs(t, err, domain.ErrValidation, "target: %s", target)
+	}
+	page, perPage, err := paginationFromQuery(httptest.NewRequest(http.MethodGet, "/", nil))
+	require.NoError(t, err)
+	require.Equal(t, domain.DefaultPage, page)
+	require.Equal(t, domain.DefaultPerPage, perPage)
 }

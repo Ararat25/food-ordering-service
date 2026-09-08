@@ -35,11 +35,21 @@ func (r *CartRepo) WithTx(tx domain.Tx) domain.CartRepository {
 
 // GetOrCreate - находит корзину пользователя в заведении или создаёт новую.
 func (r *CartRepo) GetOrCreate(ctx context.Context, userID, venueID string) (*domain.Cart, error) {
-	var cart domain.Cart
+	return r.getOrCreate(ctx, userID, venueID, false)
+}
 
-	query, args, err := sb.Select(cartColumns...).From("carts").
-		Where(sq.Eq{"user_id": userID, "venue_id": venueID}).
-		ToSql()
+// GetOrCreateForUpdate - получает корзину с row lock; вызывать внутри транзакции.
+func (r *CartRepo) GetOrCreateForUpdate(ctx context.Context, userID, venueID string) (*domain.Cart, error) {
+	return r.getOrCreate(ctx, userID, venueID, true)
+}
+
+func (r *CartRepo) getOrCreate(ctx context.Context, userID, venueID string, lock bool) (*domain.Cart, error) {
+	var cart domain.Cart
+	selectBuilder := sb.Select(cartColumns...).From("carts").Where(sq.Eq{"user_id": userID, "venue_id": venueID})
+	if lock {
+		selectBuilder = selectBuilder.Suffix("FOR UPDATE")
+	}
+	query, args, err := selectBuilder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -54,28 +64,24 @@ func (r *CartRepo) GetOrCreate(ctx context.Context, userID, venueID string) (*do
 		return nil, fmt.Errorf("get cart: %w", err)
 	}
 
-	cartID := uuid.New().String()
 	insertQuery, insertArgs, insertErr := sb.Insert("carts").
 		Columns("id", "user_id", "venue_id").
-		Values(cartID, userID, venueID).
+		Values(uuid.New().String(), userID, venueID).
 		Suffix("ON CONFLICT (user_id, venue_id) DO NOTHING").
 		ToSql()
 	if insertErr != nil {
 		return nil, fmt.Errorf("build insert query: %w", insertErr)
 	}
-
 	if _, insertErr = r.db.ExecContext(ctx, insertQuery, insertArgs...); insertErr != nil {
 		return nil, fmt.Errorf("create cart: %w", insertErr)
 	}
-
-	// Корзину мог создать параллельный запрос — читаем то, что есть по факту.
+	// При гонке создания дочитываем строку; FOR UPDATE удержит её до конца checkout.
 	err = r.db.QueryRowContext(ctx, query, args...).Scan(
 		&cart.ID, &cart.UserID, &cart.VenueID, &cart.CreatedAt, &cart.UpdatedAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("get cart: %w", err)
 	}
-
 	return &cart, nil
 }
 
@@ -176,12 +182,61 @@ func (r *CartRepo) RemoveItem(ctx context.Context, itemID string) error {
 	return nil
 }
 
+// UpdateItemQuantityForUser - меняет позицию только если она принадлежит пользователю.
+func (r *CartRepo) UpdateItemQuantityForUser(ctx context.Context, userID, itemID string, quantity int) error {
+	query, args, err := sb.Update("cart_items").Set("quantity", quantity).
+		Where("id = ? AND EXISTS (SELECT 1 FROM carts WHERE carts.id = cart_items.cart_id AND carts.user_id = ?)", itemID, userID).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build query: %w", err)
+	}
+	result, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update cart item quantity: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+// RemoveItemForUser - удаляет позицию только если она принадлежит пользователю.
+func (r *CartRepo) RemoveItemForUser(ctx context.Context, userID, itemID string) error {
+	query, args, err := sb.Delete("cart_items").
+		Where("id = ? AND EXISTS (SELECT 1 FROM carts WHERE carts.id = cart_items.cart_id AND carts.user_id = ?)", itemID, userID).
+		ToSql()
+	if err != nil {
+		return fmt.Errorf("build query: %w", err)
+	}
+	result, err := r.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("remove cart item: %w", err)
+	}
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
 // GetItems - возвращает все позиции корзины по дате добавления.
 func (r *CartRepo) GetItems(ctx context.Context, cartID string) ([]domain.CartItem, error) {
-	query, args, err := sb.Select(cartItemColumns...).From("cart_items").
+	return r.getItems(ctx, cartID, false)
+}
+
+func (r *CartRepo) GetItemsForUpdate(ctx context.Context, cartID string) ([]domain.CartItem, error) {
+	return r.getItems(ctx, cartID, true)
+}
+
+func (r *CartRepo) getItems(ctx context.Context, cartID string, lock bool) ([]domain.CartItem, error) {
+	builder := sb.Select(cartItemColumns...).From("cart_items").
 		Where(sq.Eq{"cart_id": cartID}).
-		OrderBy("created_at ASC").
-		ToSql()
+		OrderBy("created_at ASC")
+	if lock {
+		builder = builder.Suffix("FOR UPDATE")
+	}
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}

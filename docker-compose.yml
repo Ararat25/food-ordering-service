@@ -37,13 +37,12 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     ports:
-      - "${APP_PORT:-8080}:8080"
+      - "${APP_HOST_PORT:-8080}:8080"
     depends_on:
       migrations:
         condition: service_completed_successfully
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
-      APP_PORT: ${APP_PORT:-8080}
       APP_LOG_LEVEL: ${APP_LOG_LEVEL:-info}
     networks:
       - avito-network
@@ -59,14 +58,14 @@ services:
       dockerfile: Dockerfile.venue
     restart: unless-stopped
     ports:
-      - "${VENUE_SERVICE_PORT:-8081}:8081"
+      - "${VENUE_HOST_PORT:-8081}:8081"
     depends_on:
       app:
         condition: service_healthy
     environment:
       MAIN_API_URL: http://app:8080
       VENUE_API_KEY: ${VENUE_API_KEY}
-      VENUE_SERVICE_PORT: ${VENUE_SERVICE_PORT:-8081}
+      VENUE_SERVICE_PORT: 8081
       VENUE_POLL_INTERVAL: ${VENUE_POLL_INTERVAL:-30s}
       VENUE_REQUEST_TIMEOUT: ${VENUE_REQUEST_TIMEOUT:-10s}
     networks:

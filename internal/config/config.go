@@ -71,6 +71,15 @@ func LoadVenue() (*VenueConfig, error) {
 
 	cfg.APIKey = getEnvStr("VENUE_API_KEY", "")
 	cfg.MainAPIURL = getEnvStr("MAIN_API_URL", "")
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return nil, fmt.Errorf("VENUE_SERVICE_PORT must be between 1 and 65535")
+	}
+	if cfg.PollInterval <= 0 {
+		return nil, fmt.Errorf("VENUE_POLL_INTERVAL must be greater than zero")
+	}
+	if cfg.RequestTimeout <= 0 {
+		return nil, fmt.Errorf("VENUE_REQUEST_TIMEOUT must be greater than zero")
+	}
 
 	return cfg, nil
 }
@@ -109,6 +118,18 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	cfg.Database.URL = dbURL
+	if cfg.App.Port < 1 || cfg.App.Port > 65535 {
+		return nil, fmt.Errorf("APP_PORT must be between 1 and 65535")
+	}
+	if cfg.App.ReadTimeout <= 0 || cfg.App.WriteTimeout <= 0 {
+		return nil, fmt.Errorf("APP_READ_TIMEOUT and APP_WRITE_TIMEOUT must be greater than zero")
+	}
+	if cfg.Database.MaxOpenConns <= 0 || cfg.Database.MaxIdleConns < 0 || cfg.Database.MaxIdleConns > cfg.Database.MaxOpenConns {
+		return nil, fmt.Errorf("DB connection limits are invalid")
+	}
+	if cfg.Database.ConnMaxLifetime <= 0 || cfg.Database.ConnMaxIdleTime <= 0 {
+		return nil, fmt.Errorf("DB connection durations must be greater than zero")
+	}
 
 	return cfg, nil
 }

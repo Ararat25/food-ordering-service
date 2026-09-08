@@ -20,18 +20,22 @@ func NewPushTokenRepo(db *sql.DB) *PushTokenRepo {
 	return &PushTokenRepo{db: db}
 }
 
-// Register - сохраняет токен, повторный такой же токен просто игнорирует.
+// Register - обновляет платформу для своего токена, но не позволяет перехватить чужой.
 func (r *PushTokenRepo) Register(ctx context.Context, t *domain.PushToken) error {
 	query, args, err := sb.Insert("push_tokens").
 		Columns("id", "user_id", "token", "platform").
 		Values(t.ID, t.UserID, t.Token, t.Platform).
-		Suffix("ON CONFLICT (token) DO NOTHING").
+		Suffix("ON CONFLICT (token) DO UPDATE SET platform = EXCLUDED.platform WHERE push_tokens.user_id = EXCLUDED.user_id RETURNING id").
 		ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, query, args...)
+	var id string
+	err = r.db.QueryRowContext(ctx, query, args...).Scan(&id)
+	if err == sql.ErrNoRows {
+		return domain.ErrAlreadyExists
+	}
 	if err != nil {
 		return fmt.Errorf("register push token: %w", err)
 	}
@@ -70,16 +74,23 @@ func (r *PushTokenRepo) GetByUserID(ctx context.Context, userID string) ([]domai
 	return tokens, nil
 }
 
-// Delete - удаляет токен по его значению.
-func (r *PushTokenRepo) Delete(ctx context.Context, token string) error {
-	query, args, err := sb.Delete("push_tokens").Where(sq.Eq{"token": token}).ToSql()
+// DeleteForUser - удаляет токен только если он принадлежит указанному пользователю.
+func (r *PushTokenRepo) DeleteForUser(ctx context.Context, userID, token string) error {
+	query, args, err := sb.Delete("push_tokens").Where(sq.Eq{"user_id": userID, "token": token}).ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
 
-	_, err = r.db.ExecContext(ctx, query, args...)
+	result, err := r.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("delete push token: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("check deleted push token: %w", err)
+	}
+	if rowsAffected == 0 {
+		return domain.ErrNotFound
 	}
 
 	return nil

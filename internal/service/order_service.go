@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -38,11 +39,6 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 		return existing, err
 	}
 
-	cart, cartItems, err := s.loadCart(ctx, userID, req.VenueID)
-	if err != nil {
-		return nil, err
-	}
-
 	tx, err := s.transactor.BeginTx(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin order tx: %w", err)
@@ -52,6 +48,20 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 	orderTxRepo := s.orderRepo.WithTx(tx)
 	cartTxRepo := s.cartRepo.WithTx(tx)
 	itemTxRepo := s.itemRepo.WithTx(tx)
+	cart, err := cartTxRepo.GetOrCreateForUpdate(ctx, userID, req.VenueID)
+	if err != nil {
+		return nil, fmt.Errorf("lock cart: %w", err)
+	}
+	if existing, done, idemErr := s.findIdempotentOrder(ctx, userID, req.IdempotencyKey); idemErr != nil || done {
+		return existing, idemErr
+	}
+	cartItems, err := cartTxRepo.GetItemsForUpdate(ctx, cart.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get cart items: %w", err)
+	}
+	if len(cartItems) == 0 {
+		return nil, fmt.Errorf("%w: cart is empty", domain.ErrValidation)
+	}
 
 	// Блюда грузим с локой строк: между проверкой наличия и записью
 	// заказа их никто не снимет с продажи.
@@ -80,13 +90,14 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 		Comment:         req.Comment,
 		TotalAmount:     totalAmount,
 		IdempotencyKey:  req.IdempotencyKey,
+		Items:           orderItems,
 	}
 
 	if err := orderTxRepo.CreateWithItems(ctx, order, orderItems, paymentMethod); err != nil {
 		// Параллельный запрос с тем же ключом мог успеть первым:
 		// тогда отдаём его заказ вместо ошибки дубля.
 		if req.IdempotencyKey != "" {
-			if existing, getErr := s.orderRepo.GetByIdempotencyKey(ctx, req.IdempotencyKey); getErr == nil {
+			if existing, getErr := s.orderRepo.GetByUserAndIdempotencyKey(ctx, userID, req.IdempotencyKey); getErr == nil {
 				_ = tx.Rollback()
 				return existing, nil
 			}
@@ -107,14 +118,30 @@ func (s *OrderService) Create(ctx context.Context, userID string, req domain.Cre
 
 // checkCreateRequest - проверяет входные данные заказа, возвращает способ оплаты.
 func checkCreateRequest(req domain.CreateOrderRequest) (string, error) {
+	if key := req.IdempotencyKey; key != "" {
+		if len(key) > 255 || strings.TrimSpace(key) == "" {
+			return "", fmt.Errorf("%w: idempotency key must contain 1 to 255 printable ASCII characters", domain.ErrValidation)
+		}
+		for i := 0; i < len(key); i++ {
+			if key[i] < 0x21 || key[i] > 0x7e {
+				return "", fmt.Errorf("%w: idempotency key must contain 1 to 255 printable ASCII characters", domain.ErrValidation)
+			}
+		}
+	}
 	if req.VenueID == "" {
 		return "", fmt.Errorf("%w: venue_id is required", domain.ErrValidation)
 	}
 	if req.DeliveryType != string(domain.DeliveryTypeDelivery) && req.DeliveryType != string(domain.DeliveryTypePickup) {
 		return "", fmt.Errorf("%w: invalid delivery type: %s", domain.ErrValidation, req.DeliveryType)
 	}
+	if req.DeliveryType == string(domain.DeliveryTypeDelivery) && strings.TrimSpace(req.DeliveryAddress) == "" {
+		return "", fmt.Errorf("%w: delivery_address is required for delivery", domain.ErrValidation)
+	}
 	if req.PaymentMethod == "" {
 		return defaultPaymentMethod, nil
+	}
+	if req.PaymentMethod != "card" && req.PaymentMethod != "cash" && req.PaymentMethod != "sbp" {
+		return "", fmt.Errorf("%w: payment_method must be card, cash or sbp", domain.ErrValidation)
 	}
 	return req.PaymentMethod, nil
 }
@@ -124,7 +151,7 @@ func (s *OrderService) findIdempotentOrder(ctx context.Context, userID, key stri
 	if key == "" {
 		return nil, false, nil
 	}
-	existing, err := s.orderRepo.GetByIdempotencyKey(ctx, key)
+	existing, err := s.orderRepo.GetByUserAndIdempotencyKey(ctx, userID, key)
 	if err == nil {
 		if existing.UserID != userID {
 			return nil, true, domain.ErrForbidden
@@ -171,7 +198,14 @@ func buildOrderItems(cartItems []domain.CartItem, menuItems map[string]domain.Me
 			return nil, 0, fmt.Errorf("%w: menu item %s is not available", domain.ErrValidation, menuItem.Name)
 		}
 
-		totalAmount += menuItem.Price * int64(ci.Quantity)
+		lineAmount, err := checkedLineAmount(menuItem.Price, ci.Quantity)
+		if err != nil {
+			return nil, 0, err
+		}
+		if totalAmount > maxInt64-lineAmount {
+			return nil, 0, fmt.Errorf("%w: order total exceeds the supported amount", domain.ErrValidation)
+		}
+		totalAmount += lineAmount
 
 		orderItems = append(orderItems, domain.OrderItem{
 			ID:         uuid.New().String(),
@@ -186,9 +220,48 @@ func buildOrderItems(cartItems []domain.CartItem, menuItems map[string]domain.Me
 	return orderItems, totalAmount, nil
 }
 
+const maxInt64 = int64(1<<63 - 1)
+
+func checkedLineAmount(price int64, quantity int) (int64, error) {
+	if price < 0 || quantity <= 0 || quantity > domain.MaxCartItemQuantity {
+		return 0, fmt.Errorf("%w: invalid price or quantity", domain.ErrValidation)
+	}
+	q := int64(quantity)
+	if price > maxInt64/q {
+		return 0, fmt.Errorf("%w: line amount exceeds the supported amount", domain.ErrValidation)
+	}
+	return price * q, nil
+}
+
 // GetByID - возвращает заказ по id.
 func (s *OrderService) GetByID(ctx context.Context, id string) (*domain.Order, error) {
 	return s.orderRepo.GetByID(ctx, id)
+}
+
+// GetByUser - возвращает детали заказа только его владельцу.
+func (s *OrderService) GetByUser(ctx context.Context, userID, id string) (*domain.Order, error) {
+	order, err := s.orderRepo.GetByIDForUser(ctx, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	order.Items, err = s.orderRepo.GetItems(ctx, order.ID)
+	if err != nil {
+		return nil, fmt.Errorf("get order items: %w", err)
+	}
+	return order, nil
+}
+
+// GetByVenue - возвращает детали заказа только заведению-владельцу.
+func (s *OrderService) GetByVenue(ctx context.Context, venueID, id string) (*domain.Order, error) {
+	order, err := s.orderRepo.GetByIDForVenue(ctx, id, venueID)
+	if err != nil {
+		return nil, err
+	}
+	order.Items, err = s.orderRepo.GetItems(ctx, order.ID)
+	if err != nil {
+		return nil, fmt.Errorf("get order items: %w", err)
+	}
+	return order, nil
 }
 
 // ListByUser - возвращает заказы пользователя постранично.
@@ -214,7 +287,7 @@ func (s *OrderService) UpdateStatus(ctx context.Context, id string, status domai
 		return err
 	}
 
-	return s.orderRepo.UpdateStatus(ctx, id, status)
+	return s.orderRepo.UpdateStatusFrom(ctx, id, order.Status, status)
 }
 
 // UpdateVenueOrderStatus - меняет статус, но только своего заказа, чужой даёт ErrForbidden.
@@ -232,7 +305,7 @@ func (s *OrderService) UpdateVenueOrderStatus(ctx context.Context, venueID, id s
 		return err
 	}
 
-	return s.orderRepo.UpdateStatus(ctx, id, status)
+	return s.orderRepo.UpdateStatusFrom(ctx, id, order.Status, status)
 }
 
 // validateTransition - проверяет, разрешён ли переход из статуса from в статус to.
@@ -321,7 +394,11 @@ func (s *OrderService) Repeat(ctx context.Context, userID, orderID string) (*dom
 			continue
 		}
 
-		totalAmount += menuItem.Price * int64(item.Quantity)
+		lineAmount, amountErr := checkedLineAmount(menuItem.Price, item.Quantity)
+		if amountErr != nil || totalAmount > maxInt64-lineAmount {
+			return nil, fmt.Errorf("%w: repeated order total exceeds the supported amount", domain.ErrValidation)
+		}
+		totalAmount += lineAmount
 
 		newItems = append(newItems, domain.OrderItem{
 			ID:         uuid.New().String(),

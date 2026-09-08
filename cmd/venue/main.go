@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"avito-kitchen/internal/api/middleware"
 	"avito-kitchen/internal/config"
 	"avito-kitchen/internal/domain"
 )
@@ -146,11 +148,41 @@ func pollLoop(ctx context.Context, logger *slog.Logger, client orderSyncer, inte
 	}
 }
 
+func orderStatusWebhookHandler(logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var update OrderStatusUpdate
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+		dec := json.NewDecoder(r.Body)
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&update); err != nil {
+			status := http.StatusBadRequest
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			middleware.WriteError(w, r, status, "invalid request body")
+			return
+		}
+		if err := dec.Decode(&struct{}{}); err != io.EOF || update.OrderID == "" || update.Status == "" {
+			middleware.WriteError(w, r, http.StatusBadRequest, "invalid request body")
+			return
+		}
+
+		logger.Info("order status update", "order_id", update.OrderID, "status", update.Status)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"message":"status received"}`))
+	}
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
 
+	if err := config.LoadDotEnv(); err != nil {
+		logger.Error("venue service failed to load .env", "error", err)
+		os.Exit(1)
+	}
 	cfg, err := config.LoadVenue()
 	if err != nil {
 		logger.Error("venue service failed to load config", "error", err)
@@ -178,25 +210,11 @@ func main() {
 		_, _ = w.Write([]byte(`{"data":[],"message":"venue orders endpoint"}`))
 	})
 
-	mux.HandleFunc("POST /webhook/order-status", func(w http.ResponseWriter, r *http.Request) {
-		var update OrderStatusUpdate
-		if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-			http.Error(w, `{"error":"invalid request"}`, http.StatusBadRequest)
-			return
-		}
-
-		logger.Info("order status update",
-			"order_id", update.OrderID,
-			"status", update.Status,
-		)
-
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"message":"status received"}`))
-	})
+	mux.HandleFunc("POST /webhook/order-status", orderStatusWebhookHandler(logger))
 
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%d", cfg.Port),
-		Handler: mux,
+		Handler: middleware.RequestID(middleware.Logging(logger)(mux)),
 	}
 
 	go func() {

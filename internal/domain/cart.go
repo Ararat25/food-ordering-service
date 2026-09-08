@@ -5,6 +5,9 @@ import (
 	"time"
 )
 
+// MaxCartItemQuantity bounds per-line quantities and keeps request/DB limits consistent.
+const MaxCartItemQuantity = 1000
+
 // Cart - корзина пользователя в одном заведении.
 type Cart struct {
 	ID        string     `json:"id" db:"id"`                 // уникальный id

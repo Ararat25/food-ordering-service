@@ -36,3 +36,11 @@ func TestNotificationMarkAsRead(t *testing.T) {
 	require.NoError(t, svc.MarkAsRead(context.Background(), "n-1"))
 	require.Equal(t, []string{"n-1"}, notifs.read)
 }
+
+func TestNotificationUnregisterTokenScopesOwner(t *testing.T) {
+	tokens := &stubPushTokenRepo{}
+	svc := NewNotificationService(&stubNotifRepo{}, tokens)
+
+	require.NoError(t, svc.UnregisterPushToken(context.Background(), "user-1", "device-token"))
+	require.Equal(t, []string{"user-1:device-token"}, tokens.revoked)
+}

@@ -5,6 +5,11 @@ import (
 	"database/sql"
 )
 
+// UserIdentityRepository - проверка существования пользовательской demo identity.
+type UserIdentityRepository interface {
+	Exists(ctx context.Context, id string) (bool, error)
+}
+
 // Transactor - начинает транзакции, реализацию даёт пакет repository.
 type Transactor interface {
 	BeginTx(ctx context.Context) (Tx, error) // открыть транзакцию
@@ -49,6 +54,7 @@ type VenueFilters struct {
 type MenuCategoryRepository interface {
 	Create(ctx context.Context, category *MenuCategory) error                                        // сохранить новую
 	GetByID(ctx context.Context, id string) (*MenuCategory, error)                                   // найти по id
+	GetByIDForVenue(ctx context.Context, id, venueID string) (*MenuCategory, error)                  // найти категорию заведения
 	ListByVenue(ctx context.Context, venueID string, page, perPage int) ([]MenuCategory, int, error) // категории заведения постранично плюс общее число
 	Update(ctx context.Context, category *MenuCategory) error                                        // обновить
 	Delete(ctx context.Context, id string) error                                                     // удалить
@@ -79,14 +85,18 @@ type MenuItemRepository interface {
 
 // CartRepository - работа с корзинами в БД.
 type CartRepository interface {
-	WithTx(tx Tx) CartRepository                                               // копия репозитория внутри транзакции
-	GetOrCreate(ctx context.Context, userID, venueID string) (*Cart, error)    // найти корзину или создать
-	GetByID(ctx context.Context, id string) (*Cart, error)                     // найти по id
-	Clear(ctx context.Context, cartID string) error                            // убрать все позиции
-	AddItem(ctx context.Context, item *CartItem) error                         // добавить позицию
-	UpdateItemQuantity(ctx context.Context, itemID string, quantity int) error // сменить количество
-	RemoveItem(ctx context.Context, itemID string) error                       // убрать позицию
-	GetItems(ctx context.Context, cartID string) ([]CartItem, error)           // все позиции корзины
+	WithTx(tx Tx) CartRepository                                                              // копия репозитория внутри транзакции
+	GetOrCreate(ctx context.Context, userID, venueID string) (*Cart, error)                   // найти корзину или создать
+	GetOrCreateForUpdate(ctx context.Context, userID, venueID string) (*Cart, error)          // получить корзину с row lock; только внутри транзакции
+	GetByID(ctx context.Context, id string) (*Cart, error)                                    // найти по id
+	Clear(ctx context.Context, cartID string) error                                           // убрать все позиции
+	AddItem(ctx context.Context, item *CartItem) error                                        // добавить позицию
+	UpdateItemQuantity(ctx context.Context, itemID string, quantity int) error                // сменить количество
+	RemoveItem(ctx context.Context, itemID string) error                                      // убрать позицию
+	UpdateItemQuantityForUser(ctx context.Context, userID, itemID string, quantity int) error // сменить количество только своей позиции
+	RemoveItemForUser(ctx context.Context, userID, itemID string) error                       // убрать только свою позицию
+	GetItems(ctx context.Context, cartID string) ([]CartItem, error)                          // все позиции корзины
+	GetItemsForUpdate(ctx context.Context, cartID string) ([]CartItem, error)                 // все позиции корзины с row lock
 }
 
 // OrderRepository - работа с заказами в БД.
@@ -95,10 +105,12 @@ type OrderRepository interface {
 	Create(ctx context.Context, order *Order) error                                                          // сохранить заказ
 	CreateWithItems(ctx context.Context, order *Order, items []OrderItem, paymentMethod string) error        // сохранить заказ с позициями и платежом в одной транзакции
 	GetByID(ctx context.Context, id string) (*Order, error)                                                  // найти по id
-	GetByIdempotencyKey(ctx context.Context, key string) (*Order, error)                                     // найти по ключу идемпотентности
+	GetByIDForUser(ctx context.Context, id, userID string) (*Order, error)                                   // найти заказ пользователя
+	GetByIDForVenue(ctx context.Context, id, venueID string) (*Order, error)                                 // найти заказ заведения
+	GetByUserAndIdempotencyKey(ctx context.Context, userID, key string) (*Order, error)                      // найти по ключу пользователя
 	ListByUser(ctx context.Context, userID string, page, perPage int) ([]Order, int, error)                  // заказы пользователя
 	ListByVenue(ctx context.Context, venueID string, status string, page, perPage int) ([]Order, int, error) // заказы заведения
-	UpdateStatus(ctx context.Context, id string, status OrderStatus) error                                   // сменить статус
+	UpdateStatusFrom(ctx context.Context, id string, from, to OrderStatus) error                             // условно сменить статус из ожидаемого состояния
 	GetItems(ctx context.Context, orderID string) ([]OrderItem, error)                                       // позиции заказа
 }
 
@@ -127,5 +139,5 @@ type NotificationRepository interface {
 type PushTokenRepository interface {
 	Register(ctx context.Context, token *PushToken) error                // сохранить токен
 	GetByUserID(ctx context.Context, userID string) ([]PushToken, error) // все токены пользователя
-	Delete(ctx context.Context, token string) error                      // удалить токен
+	DeleteForUser(ctx context.Context, userID, token string) error       // удалить токен только его владельцу
 }

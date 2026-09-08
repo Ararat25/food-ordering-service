@@ -89,6 +89,13 @@ func (s *stubCartRepo) GetOrCreate(_ context.Context, _, _ string) (*domain.Cart
 	return s.cart, nil
 }
 
+func (s *stubCartRepo) GetOrCreateForUpdate(_ context.Context, _, _ string) (*domain.Cart, error) {
+	if s.cartErr != nil {
+		return nil, s.cartErr
+	}
+	return s.cart, nil
+}
+
 func (s *stubCartRepo) GetByID(_ context.Context, _ string) (*domain.Cart, error) {
 	return s.cart, nil
 }
@@ -116,8 +123,20 @@ func (s *stubCartRepo) RemoveItem(_ context.Context, itemID string) error {
 	return s.removeErr
 }
 
+func (s *stubCartRepo) UpdateItemQuantityForUser(ctx context.Context, _ string, itemID string, quantity int) error {
+	return s.UpdateItemQuantity(ctx, itemID, quantity)
+}
+
+func (s *stubCartRepo) RemoveItemForUser(ctx context.Context, _ string, itemID string) error {
+	return s.RemoveItem(ctx, itemID)
+}
+
 func (s *stubCartRepo) GetItems(_ context.Context, _ string) ([]domain.CartItem, error) {
 	return s.items, s.itemsErr
+}
+
+func (s *stubCartRepo) GetItemsForUpdate(ctx context.Context, cartID string) ([]domain.CartItem, error) {
+	return s.GetItems(ctx, cartID)
 }
 
 type stubOrderRepo struct {
@@ -159,11 +178,40 @@ func (s *stubOrderRepo) GetByIdempotencyKey(_ context.Context, _ string) (*domai
 	return s.idemOrder, nil
 }
 
+func (s *stubOrderRepo) GetByUserAndIdempotencyKey(ctx context.Context, userID string, key string) (*domain.Order, error) {
+	if s.idemOrder != nil && s.idemOrder.UserID != userID {
+		return nil, domain.ErrNotFound
+	}
+	return s.GetByIdempotencyKey(ctx, key)
+}
+
 func (s *stubOrderRepo) GetByID(_ context.Context, _ string) (*domain.Order, error) {
 	if s.orderErr != nil {
 		return nil, s.orderErr
 	}
 	return s.order, nil
+}
+
+func (s *stubOrderRepo) GetByIDForUser(_ context.Context, id, userID string) (*domain.Order, error) {
+	order, err := s.GetByID(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	if order.UserID != userID {
+		return nil, domain.ErrNotFound
+	}
+	return order, nil
+}
+
+func (s *stubOrderRepo) GetByIDForVenue(_ context.Context, id, venueID string) (*domain.Order, error) {
+	order, err := s.GetByID(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	if order.VenueID != venueID {
+		return nil, domain.ErrNotFound
+	}
+	return order, nil
 }
 
 func (s *stubOrderRepo) ListByUser(_ context.Context, _ string, _, _ int) ([]domain.Order, int, error) {
@@ -174,14 +222,20 @@ func (s *stubOrderRepo) ListByVenue(_ context.Context, _ string, _ string, _, _ 
 	return nil, 0, nil
 }
 
-func (s *stubOrderRepo) UpdateStatus(_ context.Context, id string, status domain.OrderStatus) error {
+func (s *stubOrderRepo) UpdateStatusFrom(_ context.Context, id string, from, status domain.OrderStatus) error {
 	if s.statusErr != nil {
 		return s.statusErr
+	}
+	if s.order != nil && s.order.Status != from {
+		return domain.ErrConflict
 	}
 	if s.statuses == nil {
 		s.statuses = map[string]domain.OrderStatus{}
 	}
 	s.statuses[id] = status
+	if s.order != nil {
+		s.order.Status = status
+	}
 	return nil
 }
 
@@ -288,6 +342,10 @@ func (s *stubMenuCategoryRepo) GetByID(_ context.Context, _ string) (*domain.Men
 	return nil, domain.ErrNotFound
 }
 
+func (s *stubMenuCategoryRepo) GetByIDForVenue(_ context.Context, _ string, _ string) (*domain.MenuCategory, error) {
+	return &domain.MenuCategory{ID: "cat-1", VenueID: "venue-1"}, nil
+}
+
 func (s *stubMenuCategoryRepo) ListByVenue(_ context.Context, _ string, page, perPage int) ([]domain.MenuCategory, int, error) {
 	s.listPage, s.listPer = page, perPage
 	return nil, s.listTotal, nil
@@ -389,6 +447,7 @@ func (s *stubNotifRepo) MarkAsRead(_ context.Context, id string) error {
 
 type stubPushTokenRepo struct {
 	registered []*domain.PushToken
+	revoked    []string
 }
 
 func (s *stubPushTokenRepo) Register(_ context.Context, t *domain.PushToken) error {
@@ -400,4 +459,7 @@ func (s *stubPushTokenRepo) GetByUserID(_ context.Context, _ string) ([]domain.P
 	return nil, nil
 }
 
-func (s *stubPushTokenRepo) Delete(_ context.Context, _ string) error { return nil }
+func (s *stubPushTokenRepo) DeleteForUser(_ context.Context, userID, token string) error {
+	s.revoked = append(s.revoked, userID+":"+token)
+	return nil
+}

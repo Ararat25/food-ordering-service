@@ -2,8 +2,12 @@ package middleware
 
 import (
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"avito-kitchen/internal/domain"
 )
@@ -14,20 +18,25 @@ func VenueAuth(venueService domain.VenueService) func(http.Handler) http.Handler
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
-				http.Error(w, `{"error":"Authorization header required","code":401}`, http.StatusUnauthorized)
+				WriteError(w, r, http.StatusUnauthorized, "Authorization header required")
 				return
 			}
 
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) != 2 || parts[0] != "Bearer" {
-				http.Error(w, `{"error":"Invalid authorization format","code":401}`, http.StatusUnauthorized)
+				WriteError(w, r, http.StatusUnauthorized, "Invalid authorization format")
 				return
 			}
 
 			apiKey := parts[1]
 			venue, err := venueService.GetByAPIKey(r.Context(), apiKey)
 			if err != nil {
-				http.Error(w, `{"error":"Invalid API key","code":401}`, http.StatusUnauthorized)
+				if errors.Is(err, domain.ErrNotFound) || errors.Is(err, domain.ErrUnauthorized) {
+					WriteError(w, r, http.StatusUnauthorized, "Invalid API key")
+					return
+				}
+				slog.ErrorContext(r.Context(), "venue authentication lookup failed", "error", err, "request_id", r.Context().Value(RequestIDKey))
+				WriteError(w, r, http.StatusInternalServerError, "internal error")
 				return
 			}
 
@@ -38,17 +47,32 @@ func VenueAuth(venueService domain.VenueService) func(http.Handler) http.Handler
 }
 
 // UserAuth - проверяет заголовок пользователя и кладёт его id в контекст.
-func UserAuth(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Header.Get("X-User-ID")
-		if userID == "" {
-			http.Error(w, `{"error":"X-User-ID header required","code":401}`, http.StatusUnauthorized)
-			return
-		}
-
-		ctx := context.WithValue(r.Context(), contextKey("user_id"), userID)
-		next.ServeHTTP(w, r.WithContext(ctx))
-	})
+func UserAuth(userRepo domain.UserIdentityRepository) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			userID := r.Header.Get("X-User-ID")
+			if userID == "" {
+				WriteError(w, r, http.StatusUnauthorized, "X-User-ID header required")
+				return
+			}
+			if _, err := uuid.Parse(userID); err != nil {
+				WriteError(w, r, http.StatusBadRequest, "X-User-ID must be a UUID")
+				return
+			}
+			exists, err := userRepo.Exists(r.Context(), userID)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "user identity lookup failed", "error", err, "request_id", r.Context().Value(RequestIDKey))
+				WriteError(w, r, http.StatusInternalServerError, "internal error")
+				return
+			}
+			if !exists {
+				WriteError(w, r, http.StatusUnauthorized, "unknown X-User-ID")
+				return
+			}
+			ctx := context.WithValue(r.Context(), contextKey("user_id"), userID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
 // GetVenueID - достаёт id заведения из контекста.

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,9 +50,9 @@ func TestOrderCreateEmptyCart(t *testing.T) {
 	cart, items := orderTestCart()
 	cart.items = nil
 
-	svc := NewOrderService(&stubOrderRepo{}, cart, items, &stubTransactor{})
+	svc := NewOrderService(&stubOrderRepo{}, cart, items, &stubTransactor{tx: &stubTx{}})
 	_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
-		VenueID: "venue-1", DeliveryType: "delivery",
+		VenueID: "venue-1", DeliveryType: "delivery", DeliveryAddress: "ул. Тестовая, 1",
 	})
 	require.ErrorIs(t, err, domain.ErrValidation)
 	require.Contains(t, err.Error(), "cart is empty")
@@ -116,6 +117,7 @@ func TestOrderCreateCommitsAll(t *testing.T) {
 		repository.NewTransactor(mockDB),
 	)
 
+	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id, user_id, venue_id, created_at, updated_at FROM carts").WithArgs("user-1", "venue-1").WillReturnRows(
 		sqlmock.NewRows([]string{"id", "user_id", "venue_id", "created_at", "updated_at"}).
 			AddRow("cart-1", "user-1", "venue-1", time.Now(), time.Now()),
@@ -124,7 +126,6 @@ func TestOrderCreateCommitsAll(t *testing.T) {
 		sqlmock.NewRows([]string{"id", "cart_id", "menu_item_id", "quantity", "options", "created_at"}).
 			AddRow("ci-1", "cart-1", "item-1", 2, []byte("[]"), time.Now()),
 	)
-	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO orders").WithArgs(
 		sqlmock.AnyArg(), "user-1", "venue-1", domain.OrderStatusPending,
 		domain.DeliveryType("delivery"), sqlmock.AnyArg(), sqlmock.AnyArg(),
@@ -141,7 +142,7 @@ func TestOrderCreateCommitsAll(t *testing.T) {
 	mock.ExpectCommit()
 
 	order, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
-		VenueID: "venue-1", DeliveryType: "delivery",
+		VenueID: "venue-1", DeliveryType: "delivery", DeliveryAddress: "ул. Тестовая, 1",
 	})
 	require.NoError(t, err)
 	require.Equal(t, "user-1", order.UserID)
@@ -164,6 +165,7 @@ func TestOrderCreateRollsBack(t *testing.T) {
 		repository.NewTransactor(mockDB),
 	)
 
+	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id, user_id, venue_id, created_at, updated_at FROM carts").WithArgs("user-1", "venue-1").WillReturnRows(
 		sqlmock.NewRows([]string{"id", "user_id", "venue_id", "created_at", "updated_at"}).
 			AddRow("cart-1", "user-1", "venue-1", time.Now(), time.Now()),
@@ -172,7 +174,6 @@ func TestOrderCreateRollsBack(t *testing.T) {
 		sqlmock.NewRows([]string{"id", "cart_id", "menu_item_id", "quantity", "options", "created_at"}).
 			AddRow("ci-1", "cart-1", "item-1", 2, []byte("[]"), time.Now()),
 	)
-	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO orders").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO order_items").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO payments").WillReturnResult(sqlmock.NewResult(1, 1))
@@ -180,7 +181,7 @@ func TestOrderCreateRollsBack(t *testing.T) {
 	mock.ExpectRollback()
 
 	_, err = svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
-		VenueID: "venue-1", DeliveryType: "delivery",
+		VenueID: "venue-1", DeliveryType: "delivery", DeliveryAddress: "ул. Тестовая, 1",
 	})
 	require.ErrorContains(t, err, "failed to clear cart")
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -293,23 +294,26 @@ func TestOrderCreateIdempotency(t *testing.T) {
 		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
 
 		got, err := svc.Create(context.Background(), "u-1", domain.CreateOrderRequest{
-			VenueID: "venue-1", DeliveryType: "delivery", IdempotencyKey: "key-1",
+			VenueID: "venue-1", DeliveryType: "delivery", DeliveryAddress: "ул. Тестовая, 1", IdempotencyKey: "key-1",
 		})
 		require.NoError(t, err)
 		require.Equal(t, "o-old", got.ID)
 		require.Empty(t, orderRepo.created)
 	})
 
-	t.Run("чужой ключ не отдают", func(t *testing.T) {
+	t.Run("тот же ключ у другого пользователя не конфликтует", func(t *testing.T) {
 		existing := &domain.Order{ID: "o-old", UserID: "u-2", VenueID: "v-1", Status: domain.OrderStatusPending}
 		orderRepo := &stubOrderRepo{idemOrder: existing}
 		cart, items := orderTestCart()
 		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
 
-		_, err := svc.Create(context.Background(), "u-1", domain.CreateOrderRequest{
-			VenueID: "venue-1", DeliveryType: "delivery", IdempotencyKey: "key-1",
+		got, err := svc.Create(context.Background(), "u-1", domain.CreateOrderRequest{
+			VenueID: "venue-1", DeliveryType: "delivery", DeliveryAddress: "ул. Тестовая, 1", IdempotencyKey: "key-1",
 		})
-		require.ErrorIs(t, err, domain.ErrForbidden)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, "u-1", got.UserID)
+		require.Len(t, orderRepo.created, 1)
 	})
 }
 
@@ -320,7 +324,7 @@ func TestOrderCreatePaymentMethod(t *testing.T) {
 		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
 
 		_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
-			VenueID: "venue-1", DeliveryType: "delivery", PaymentMethod: "cash",
+			VenueID: "venue-1", DeliveryType: "delivery", DeliveryAddress: "ул. Тестовая, 1", PaymentMethod: "cash",
 		})
 		require.NoError(t, err)
 		require.Equal(t, "cash", orderRepo.payMethod)
@@ -332,9 +336,62 @@ func TestOrderCreatePaymentMethod(t *testing.T) {
 		svc := NewOrderService(orderRepo, cart, items, &stubTransactor{tx: &stubTx{}})
 
 		_, err := svc.Create(context.Background(), "user-1", domain.CreateOrderRequest{
-			VenueID: "venue-1", DeliveryType: "delivery",
+			VenueID: "venue-1", DeliveryType: "delivery", DeliveryAddress: "ул. Тестовая, 1",
 		})
 		require.NoError(t, err)
 		require.Equal(t, "card", orderRepo.payMethod)
 	})
+}
+
+func TestBuildOrderItemsRejectsInt64Overflow(t *testing.T) {
+	t.Run("multiplication overflow", func(t *testing.T) {
+		items, total, err := buildOrderItems(
+			[]domain.CartItem{{MenuItemID: "item-1", Quantity: 2}},
+			map[string]domain.MenuItem{"item-1": {ID: "item-1", Price: maxInt64, IsAvailable: true}},
+			"order-1",
+		)
+		require.ErrorIs(t, err, domain.ErrValidation)
+		require.Nil(t, items)
+		require.Zero(t, total)
+	})
+
+	t.Run("sum overflow", func(t *testing.T) {
+		price := maxInt64/2 + 1
+		items, total, err := buildOrderItems(
+			[]domain.CartItem{{MenuItemID: "item-1", Quantity: 1}, {MenuItemID: "item-2", Quantity: 1}},
+			map[string]domain.MenuItem{
+				"item-1": {ID: "item-1", Price: price, IsAvailable: true},
+				"item-2": {ID: "item-2", Price: price, IsAvailable: true},
+			},
+			"order-1",
+		)
+		require.ErrorIs(t, err, domain.ErrValidation)
+		require.Nil(t, items)
+		require.Zero(t, total)
+	})
+
+	t.Run("max int64 without overflow is accepted", func(t *testing.T) {
+		items, total, err := buildOrderItems(
+			[]domain.CartItem{{MenuItemID: "item-1", Quantity: 1}},
+			map[string]domain.MenuItem{"item-1": {ID: "item-1", Price: maxInt64, IsAvailable: true}},
+			"order-1",
+		)
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		require.Equal(t, maxInt64, total)
+	})
+}
+
+func TestCheckCreateRequestIdempotencyKeyFormat(t *testing.T) {
+	base := domain.CreateOrderRequest{VenueID: "v-1", DeliveryType: "delivery", DeliveryAddress: "address"}
+	for _, key := range []string{"", "valid-key_123", strings.Repeat("x", 256), "with space", "ключ"} {
+		req := base
+		req.IdempotencyKey = key
+		_, err := checkCreateRequest(req)
+		if key == "" || key == "valid-key_123" {
+			require.NoError(t, err)
+		} else {
+			require.ErrorIs(t, err, domain.ErrValidation)
+		}
+	}
 }

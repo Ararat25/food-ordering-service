@@ -23,7 +23,11 @@ func NewVenueHandler(venueService domain.VenueService, logger *slog.Logger) *Ven
 // List - отдаёт список заведений с поиском и пагинацией.
 func (h *VenueHandler) List(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("search")
-	page, perPage := paginationFromQuery(r)
+	page, perPage, err := paginationFromQuery(r)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	filters := domain.VenueFilters{
 		Search:  search,

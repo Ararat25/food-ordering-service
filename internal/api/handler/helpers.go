@@ -3,6 +3,8 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,11 +13,28 @@ import (
 	"avito-kitchen/internal/domain"
 )
 
-// paginationFromQuery - достаёт page/per_page из query, кривые значения чинит нормализация.
-func paginationFromQuery(r *http.Request) (int, int) {
-	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
-	perPage, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
-	return domain.NormalizePagination(page, perPage)
+// paginationFromQuery - defaults omitted values and rejects malformed/out-of-range values.
+func paginationFromQuery(r *http.Request) (int, int, error) {
+	page, perPage := domain.DefaultPage, domain.DefaultPerPage
+	if raw := r.URL.Query().Get("page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return 0, 0, fmt.Errorf("%w: page must be a positive integer", domain.ErrValidation)
+		}
+		page = parsed
+	}
+	if raw := r.URL.Query().Get("per_page"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 || parsed > domain.MaxPerPage {
+			return 0, 0, fmt.Errorf("%w: per_page must be between 1 and %d", domain.ErrValidation, domain.MaxPerPage)
+		}
+		perPage = parsed
+	}
+	maxInt := int(^uint(0) >> 1)
+	if page-1 > maxInt/perPage {
+		return 0, 0, fmt.Errorf("%w: page is too large", domain.ErrValidation)
+	}
+	return page, perPage, nil
 }
 
 // writeJSON - отдаёт ответ в JSON с нужным статусом.
@@ -27,14 +46,7 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 // writeError - отдаёт ошибку в формате {"error","code"} плюс request_id для корреляции с логами.
 func writeError(w http.ResponseWriter, r *http.Request, status int, message string) {
-	body := map[string]any{
-		"error": message,
-		"code":  status,
-	}
-	if requestID, ok := r.Context().Value(middleware.RequestIDKey).(string); ok {
-		body["request_id"] = requestID
-	}
-	writeJSON(w, status, body)
+	middleware.WriteError(w, r, status, message)
 }
 
 // writeServiceError - отдаёт ошибку сервисного слоя: клиентские как есть,
@@ -46,6 +58,7 @@ func writeServiceError(w http.ResponseWriter, r *http.Request, logger *slog.Logg
 			"error", err,
 			"method", r.Method,
 			"path", r.URL.Path,
+			"request_id", r.Context().Value(middleware.RequestIDKey),
 		)
 		writeError(w, r, status, "internal error")
 		return
@@ -75,7 +88,26 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
-	return dec.Decode(v)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return errors.New("request body must contain exactly one JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func writeDecodeError(w http.ResponseWriter, r *http.Request, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, r, http.StatusRequestEntityTooLarge, "request body too large")
+		return
+	}
+	writeError(w, r, http.StatusBadRequest, "invalid request body")
 }
 
 // domainErrorToHTTP - переводит ошибку домена в HTTP-код.
@@ -84,6 +116,8 @@ func domainErrorToHTTP(err error) int {
 	case errors.Is(err, domain.ErrNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, domain.ErrAlreadyExists):
+		return http.StatusConflict
+	case errors.Is(err, domain.ErrConflict):
 		return http.StatusConflict
 	case errors.Is(err, domain.ErrUnauthorized):
 		return http.StatusUnauthorized

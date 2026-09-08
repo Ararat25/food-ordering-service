@@ -3,23 +3,26 @@ info:
   title: Авито.Кухня API
   version: 1.0.0
   description: API для сервиса доставки еды Авито.Кухня
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
 
 servers:
-  - url: http://localhost:8080
+  - url: http://127.0.0.1:8080
     description: Local development
 
-security:
-  BearerAuth:
-    - venue_api_key: []
-  UserIDHeader:
-    - user_id: []
+# Public by default; authenticated operations override this with their scheme.
+security: []
 
 paths:
   /health:
     get:
+      operationId: getHealth
       summary: Healthcheck
       tags: [Health]
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '200':
           description: OK
           content:
@@ -33,6 +36,7 @@ paths:
 
   /api/v1/venues:
     get:
+      operationId: getApiV1Venues
       summary: Список заведений
       tags: [Venues]
       parameters:
@@ -51,6 +55,8 @@ paths:
             type: integer
             default: 20
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '200':
           description: Список заведений
           content:
@@ -60,6 +66,7 @@ paths:
 
   /api/v1/venues/{id}:
     get:
+      operationId: getApiV1VenuesById
       summary: Детали заведения
       tags: [Venues]
       parameters:
@@ -81,6 +88,7 @@ paths:
 
   /api/v1/venues/{id}/menu:
     get:
+      operationId: getApiV1VenuesByIdMenu
       summary: Меню заведения
       tags: [Menu]
       parameters:
@@ -107,6 +115,8 @@ paths:
           schema:
             type: boolean
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '200':
           description: Меню
           content:
@@ -123,6 +133,7 @@ paths:
 
   /api/v1/venues/{id}/reviews:
     get:
+      operationId: getApiV1VenuesByIdReviews
       summary: Отзывы заведения
       tags: [Reviews]
       parameters:
@@ -141,9 +152,12 @@ paths:
           schema:
             type: integer
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '200':
           description: Отзывы
     post:
+      operationId: postApiV1VenuesByIdReviews
       summary: Оставить отзыв
       tags: [Reviews]
       security:
@@ -162,6 +176,8 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateReviewRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '201':
           description: Отзыв создан
         '400':
@@ -169,6 +185,7 @@ paths:
 
   /api/v1/cart:
     get:
+      operationId: getApiV1Cart
       summary: Получить корзину
       tags: [Cart]
       security:
@@ -181,9 +198,14 @@ paths:
             type: string
             format: uuid
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Корзина
     delete:
+      operationId: deleteApiV1Cart
       summary: Очистить корзину
       tags: [Cart]
       security:
@@ -196,11 +218,16 @@ paths:
             type: string
             format: uuid
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Корзина очищена
 
   /api/v1/cart/items:
     post:
+      operationId: postApiV1CartItems
       summary: Добавить товар в корзину
       tags: [Cart]
       security:
@@ -219,11 +246,16 @@ paths:
             schema:
               $ref: '#/components/schemas/AddToCartRequest'
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Товар добавлен
 
   /api/v1/cart/items/{id}:
     put:
+      operationId: putApiV1CartItemsById
       summary: Обновить количество
       tags: [Cart]
       security:
@@ -244,9 +276,14 @@ paths:
                 quantity:
                   type: integer
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Обновлено
     delete:
+      operationId: deleteApiV1CartItemsById
       summary: Удалить товар из корзины
       tags: [Cart]
       security:
@@ -258,11 +295,16 @@ paths:
           schema:
             type: string
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Удалено
 
   /api/v1/orders:
     post:
+      operationId: postApiV1Orders
       summary: Создать заказ
       tags: [Orders]
       security:
@@ -272,6 +314,8 @@ paths:
           in: header
           schema:
             type: string
+            maxLength: 255
+            pattern: '^[!-~]{1,255}$'
           description: Повтор с тем же ключом вернёт уже созданный заказ
       requestBody:
         required: true
@@ -280,11 +324,14 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateOrderRequest'
       responses:
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '201':
           description: Заказ создан
         '400':
           $ref: '#/components/responses/BadRequest'
     get:
+      operationId: getApiV1Orders
       summary: Список заказов пользователя
       tags: [Orders]
       security:
@@ -299,11 +346,16 @@ paths:
           schema:
             type: integer
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Заказы
 
   /api/v1/orders/{id}:
     get:
+      operationId: getApiV1OrdersById
       summary: Детали заказа
       tags: [Orders]
       security:
@@ -316,11 +368,16 @@ paths:
             type: string
             format: uuid
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Заказ
 
   /api/v1/orders/{id}/track:
     get:
+      operationId: getApiV1OrdersByIdTrack
       summary: Отслеживание заказа
       tags: [Orders]
       security:
@@ -333,11 +390,16 @@ paths:
             type: string
             format: uuid
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Статус заказа
 
   /api/v1/orders/{id}/repeat:
     post:
+      operationId: postApiV1OrdersByIdRepeat
       summary: Повторить заказ
       tags: [Orders]
       security:
@@ -350,11 +412,16 @@ paths:
             type: string
             format: uuid
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '201':
           description: Заказ повторён
 
   /api/v1/venue/menu/categories:
     get:
+      operationId: getApiV1VenueMenuCategories
       summary: Категории меню заведения
       tags: [Venue Menu]
       security:
@@ -369,11 +436,43 @@ paths:
           schema:
             type: integer
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Категории
+    post:
+      operationId: postApiV1VenueMenuCategories
+      summary: Создать категорию меню
+      tags: [Venue Menu]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 255
+                sort_order:
+                  type: integer
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '201':
+          description: Категория создана
 
   /api/v1/venue/menu:
     get:
+      operationId: getApiV1VenueMenu
       summary: Получить меню заведения
       tags: [Venue Menu]
       security:
@@ -396,9 +495,14 @@ paths:
           schema:
             type: boolean
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Меню
     post:
+      operationId: postApiV1VenueMenu
       summary: Добавить блюдо
       tags: [Venue Menu]
       security:
@@ -410,11 +514,16 @@ paths:
             schema:
               $ref: '#/components/schemas/MenuItem'
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '201':
           description: Блюдо добавлено
 
   /api/v1/venue/menu/{id}:
     put:
+      operationId: putApiV1VenueMenuById
       summary: Обновить блюдо
       tags: [Venue Menu]
       security:
@@ -426,9 +535,14 @@ paths:
           schema:
             type: string
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Блюдо обновлено
     delete:
+      operationId: deleteApiV1VenueMenuById
       summary: Удалить блюдо
       tags: [Venue Menu]
       security:
@@ -440,11 +554,16 @@ paths:
           schema:
             type: string
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Блюдо удалено
 
   /api/v1/venue/menu/{id}/availability:
     patch:
+      operationId: patchApiV1VenueMenuByIdAvailability
       summary: Изменить доступность
       tags: [Venue Menu]
       security:
@@ -465,11 +584,16 @@ paths:
                 available:
                   type: boolean
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Доступность обновлена
 
   /api/v1/venue/orders:
     get:
+      operationId: getApiV1VenueOrders
       summary: Список заказов заведения
       tags: [Venue Orders]
       security:
@@ -479,6 +603,7 @@ paths:
           in: query
           schema:
             type: string
+            enum: [pending, accepted, preparing, ready, delivering, delivered, cancelled]
         - name: page
           in: query
           schema:
@@ -488,11 +613,16 @@ paths:
           schema:
             type: integer
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Заказы
 
   /api/v1/venue/orders/{id}:
     get:
+      operationId: getApiV1VenueOrdersById
       summary: Детали заказа заведения
       tags: [Venue Orders]
       security:
@@ -504,11 +634,16 @@ paths:
           schema:
             type: string
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Заказ
 
   /api/v1/venue/orders/{id}/accept:
     patch:
+      operationId: patchApiV1VenueOrdersByIdAccept
       summary: Принять заказ
       tags: [Venue Orders]
       security:
@@ -520,11 +655,16 @@ paths:
           schema:
             type: string
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Заказ принят
 
   /api/v1/venue/orders/{id}/reject:
     patch:
+      operationId: patchApiV1VenueOrdersByIdReject
       summary: Отклонить заказ
       tags: [Venue Orders]
       security:
@@ -536,11 +676,16 @@ paths:
           schema:
             type: string
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Заказ отклонён
 
   /api/v1/venue/orders/{id}/status:
     patch:
+      operationId: patchApiV1VenueOrdersByIdStatus
       summary: Обновить статус заказа
       tags: [Venue Orders]
       security:
@@ -557,16 +702,22 @@ paths:
           application/json:
             schema:
               type: object
+              required: [status]
               properties:
                 status:
                   type: string
-                  enum: [preparing, ready]
+                  enum: [accepted, preparing, ready, delivering, delivered, cancelled]
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Статус обновлён
 
   /api/v1/notifications/register:
     post:
+      operationId: postApiV1NotificationsRegister
       summary: Регистрация push-токена
       tags: [Notifications]
       security:
@@ -577,18 +728,59 @@ paths:
           application/json:
             schema:
               type: object
+              required: [token, platform]
               properties:
                 token:
                   type: string
+                  minLength: 1
+                  maxLength: 500
                 platform:
                   type: string
                   enum: [ios, android, web]
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: Токен уже зарегистрирован другим пользователем
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '200':
           description: Токен зарегистрирован
+    delete:
+      operationId: deleteApiV1NotificationsRegister
+      summary: Отозвать push-токен
+      tags: [Notifications]
+      security:
+        - UserIDHeader: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '200':
+          description: Токен отозван
 
   /api/v1/notifications:
     get:
+      operationId: getApiV1Notifications
       summary: Список уведомлений
       tags: [Notifications]
       security:
@@ -603,21 +795,25 @@ paths:
           schema:
             type: integer
       responses:
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '200':
           description: Уведомления
 
 components:
   securitySchemes:
     BearerAuth:
-      type: apiKey
-      in: header
-      name: Authorization
-      description: "Bearer {api_key}"
+      type: http
+      scheme: bearer
+      bearerFormat: API key
+      description: "Bearer token for the venue API key"
     UserIDHeader:
       type: apiKey
       in: header
       name: X-User-ID
-      description: User ID (заглушка для MVP)
+      description: "Demo identity only; X-User-ID must be a UUID of an existing users row and is not authentication"
 
   schemas:
     Venue:
@@ -711,8 +907,12 @@ components:
         quantity:
           type: integer
           default: 1
+          minimum: 1
+          maximum: 1000
         options:
           type: object
+          additionalProperties:
+            type: string
 
     CreateOrderRequest:
       type: object
@@ -730,6 +930,7 @@ components:
           type: string
         payment_method:
           type: string
+          enum: [card, cash, sbp]
           description: card, cash или sbp; по умолчанию card
 
     Pagination:

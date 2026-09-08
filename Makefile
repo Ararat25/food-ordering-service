@@ -17,10 +17,10 @@ lint:
 	golangci-lint run ./...
 
 migrate-up:
-	goose -dir migrations postgres "$(DATABASE_URL)" up
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; goose -dir migrations postgres "$$DATABASE_URL" up
 
 migrate-down:
-	goose -dir migrations postgres "$(DATABASE_URL)" down
+	@set -a; if [ -f .env ]; then . ./.env; fi; set +a; goose -dir migrations postgres "$$DATABASE_URL" down
 
 seed: migrate-up
 

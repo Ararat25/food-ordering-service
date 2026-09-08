@@ -150,9 +150,9 @@ func scanOrder(s rowScanner, order *domain.Order) error {
 	return nil
 }
 
-// GetByIdempotencyKey - находит заказ по ключу идемпотентности, нет такого — ErrNotFound.
-func (r *OrderRepo) GetByIdempotencyKey(ctx context.Context, key string) (*domain.Order, error) {
-	query, args, err := sb.Select(orderColumns...).From("orders").Where(sq.Eq{"idempotency_key": key}).ToSql()
+// GetByUserAndIdempotencyKey - находит заказ пользователя по ключу идемпотентности.
+func (r *OrderRepo) GetByUserAndIdempotencyKey(ctx context.Context, userID, key string) (*domain.Order, error) {
+	query, args, err := sb.Select(orderColumns...).From("orders").Where(sq.Eq{"user_id": userID, "idempotency_key": key}).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -163,7 +163,7 @@ func (r *OrderRepo) GetByIdempotencyKey(ctx context.Context, key string) (*domai
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get order by idempotency key: %w", err)
+		return nil, fmt.Errorf("get order by user and idempotency key: %w", err)
 	}
 
 	return &order, nil
@@ -171,7 +171,21 @@ func (r *OrderRepo) GetByIdempotencyKey(ctx context.Context, key string) (*domai
 
 // GetByID - находит заказ по id.
 func (r *OrderRepo) GetByID(ctx context.Context, id string) (*domain.Order, error) {
-	query, args, err := sb.Select(orderColumns...).From("orders").Where(sq.Eq{"id": id}).ToSql()
+	return r.getByIDWhere(ctx, sq.Eq{"id": id})
+}
+
+// GetByIDForUser - возвращает заказ только его владельцу.
+func (r *OrderRepo) GetByIDForUser(ctx context.Context, id, userID string) (*domain.Order, error) {
+	return r.getByIDWhere(ctx, sq.Eq{"id": id, "user_id": userID})
+}
+
+// GetByIDForVenue - возвращает заказ только заведению-владельцу.
+func (r *OrderRepo) GetByIDForVenue(ctx context.Context, id, venueID string) (*domain.Order, error) {
+	return r.getByIDWhere(ctx, sq.Eq{"id": id, "venue_id": venueID})
+}
+
+func (r *OrderRepo) getByIDWhere(ctx context.Context, where sq.Eq) (*domain.Order, error) {
+	query, args, err := sb.Select(orderColumns...).From("orders").Where(where).ToSql()
 	if err != nil {
 		return nil, fmt.Errorf("build query: %w", err)
 	}
@@ -182,7 +196,7 @@ func (r *OrderRepo) GetByID(ctx context.Context, id string) (*domain.Order, erro
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get order: %w", err)
+		return nil, fmt.Errorf("get scoped order: %w", err)
 	}
 
 	return &order, nil
@@ -283,13 +297,16 @@ func (r *OrderRepo) ListByVenue(ctx context.Context, venueID string, status stri
 	return orders, total, nil
 }
 
-// UpdateStatus - меняет статус заказа, чужой id даёт ErrNotFound.
-func (r *OrderRepo) UpdateStatus(ctx context.Context, id string, status domain.OrderStatus) error {
-	query, args, err := sb.Update("orders").
+// UpdateStatusFrom - меняет статус только если в БД ещё находится ожидаемое состояние.
+func (r *OrderRepo) UpdateStatusFrom(ctx context.Context, id string, from, status domain.OrderStatus) error {
+	builder := sb.Update("orders").
 		Set("status", status).
 		Set("updated_at", sq.Expr("NOW()")).
-		Where(sq.Eq{"id": id}).
-		ToSql()
+		Where(sq.Eq{"id": id, "status": from})
+	if status == domain.OrderStatusDelivered {
+		builder = builder.Set("delivery_time", sq.Expr("NOW()"))
+	}
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return fmt.Errorf("build query: %w", err)
 	}
@@ -301,7 +318,7 @@ func (r *OrderRepo) UpdateStatus(ctx context.Context, id string, status domain.O
 
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return domain.ErrNotFound
+		return domain.ErrConflict
 	}
 
 	return nil

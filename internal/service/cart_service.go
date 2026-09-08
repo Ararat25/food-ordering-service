@@ -41,6 +41,9 @@ func (s *CartService) AddItem(ctx context.Context, userID, venueID string, req d
 	if req.Quantity <= 0 {
 		return nil, fmt.Errorf("%w: quantity must be > 0", domain.ErrValidation)
 	}
+	if req.Quantity > domain.MaxCartItemQuantity {
+		return nil, fmt.Errorf("%w: quantity must be <= %d", domain.ErrValidation, domain.MaxCartItemQuantity)
+	}
 
 	item, err := s.itemRepo.GetByID(ctx, req.MenuItemID)
 	if err != nil {
@@ -53,6 +56,10 @@ func (s *CartService) AddItem(ctx context.Context, userID, venueID string, req d
 
 	if item.VenueID != venueID {
 		return nil, fmt.Errorf("%w: menu item does not belong to this venue", domain.ErrValidation)
+	}
+	selectedOptions, err := validateOptionSelection(item.Options, req.Options)
+	if err != nil {
+		return nil, err
 	}
 
 	cart, err := s.cartRepo.GetOrCreate(ctx, userID, venueID)
@@ -70,10 +77,14 @@ func (s *CartService) AddItem(ctx context.Context, userID, venueID string, req d
 	}
 
 	for _, ci := range items {
-		if ci.MenuItemID != req.MenuItemID {
+		if ci.MenuItemID != req.MenuItemID || !sameOptions(ci.Options, selectedOptions) {
 			continue
 		}
-		if err := s.cartRepo.UpdateItemQuantity(ctx, ci.ID, ci.Quantity+req.Quantity); err != nil {
+		newQuantity := ci.Quantity + req.Quantity
+		if newQuantity > domain.MaxCartItemQuantity {
+			return nil, fmt.Errorf("%w: combined quantity must be <= %d", domain.ErrValidation, domain.MaxCartItemQuantity)
+		}
+		if err := s.cartRepo.UpdateItemQuantityForUser(ctx, userID, ci.ID, newQuantity); err != nil {
 			return nil, err
 		}
 		return s.GetCart(ctx, userID, venueID)
@@ -84,7 +95,7 @@ func (s *CartService) AddItem(ctx context.Context, userID, venueID string, req d
 		CartID:     cart.ID,
 		MenuItemID: req.MenuItemID,
 		Quantity:   req.Quantity,
-		Options:    normalizeOptions(req.Options),
+		Options:    selectedOptions,
 	}
 
 	if err := s.cartRepo.AddItem(ctx, cartItem); err != nil {
@@ -96,15 +107,15 @@ func (s *CartService) AddItem(ctx context.Context, userID, venueID string, req d
 
 // UpdateItemQuantity - меняет количество у позиции корзины.
 func (s *CartService) UpdateItemQuantity(ctx context.Context, userID, itemID string, quantity int) error {
-	if quantity <= 0 {
-		return fmt.Errorf("%w: quantity must be > 0", domain.ErrValidation)
+	if quantity <= 0 || quantity > domain.MaxCartItemQuantity {
+		return fmt.Errorf("%w: quantity must be between 1 and %d", domain.ErrValidation, domain.MaxCartItemQuantity)
 	}
-	return s.cartRepo.UpdateItemQuantity(ctx, itemID, quantity)
+	return s.cartRepo.UpdateItemQuantityForUser(ctx, userID, itemID, quantity)
 }
 
 // RemoveItem - убирает позицию из корзины.
 func (s *CartService) RemoveItem(ctx context.Context, userID, itemID string) error {
-	return s.cartRepo.RemoveItem(ctx, itemID)
+	return s.cartRepo.RemoveItemForUser(ctx, userID, itemID)
 }
 
 // Clear - очищает корзину пользователя в заведении.

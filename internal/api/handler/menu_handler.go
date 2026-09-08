@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -23,14 +24,19 @@ func NewMenuHandler(menuService domain.MenuService, logger *slog.Logger) *MenuHa
 }
 
 // menuFiltersFromQuery - собирает фильтры меню из query: поиск, наличие, пагинация.
-func menuFiltersFromQuery(r *http.Request, venueID string) domain.MenuItemFilters {
-	page, perPage := paginationFromQuery(r)
+func menuFiltersFromQuery(r *http.Request, venueID string) (domain.MenuItemFilters, error) {
+	page, perPage, err := paginationFromQuery(r)
+	if err != nil {
+		return domain.MenuItemFilters{}, err
+	}
 
 	var available *bool
 	if raw := r.URL.Query().Get("available"); raw != "" {
-		if parsed, err := strconv.ParseBool(raw); err == nil {
-			available = &parsed
+		parsed, err := strconv.ParseBool(raw)
+		if err != nil {
+			return domain.MenuItemFilters{}, fmt.Errorf("%w: available must be true or false", domain.ErrValidation)
 		}
+		available = &parsed
 	}
 
 	return domain.MenuItemFilters{
@@ -39,13 +45,17 @@ func menuFiltersFromQuery(r *http.Request, venueID string) domain.MenuItemFilter
 		Available: available,
 		Page:      page,
 		PerPage:   perPage,
-	}
+	}, nil
 }
 
 // ListItems - отдаёт блюда заведения из контекста с фильтрами, для кабинета.
 func (h *MenuHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
-	filters := menuFiltersFromQuery(r, venueID)
+	filters, err := menuFiltersFromQuery(r, venueID)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	items, total, err := h.menuService.ListItems(r.Context(), filters)
 	if err != nil {
@@ -59,7 +69,11 @@ func (h *MenuHandler) ListItems(w http.ResponseWriter, r *http.Request) {
 // ListByVenuePublic - отдаёт блюда заведения по id из пути с фильтрами, для всех.
 func (h *MenuHandler) ListByVenuePublic(w http.ResponseWriter, r *http.Request) {
 	venueID := chi.URLParam(r, "id")
-	filters := menuFiltersFromQuery(r, venueID)
+	filters, err := menuFiltersFromQuery(r, venueID)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	items, total, err := h.menuService.ListItems(r.Context(), filters)
 	if err != nil {
@@ -76,7 +90,7 @@ func (h *MenuHandler) CreateItem(w http.ResponseWriter, r *http.Request) {
 
 	var item domain.MenuItem
 	if err := decodeJSON(w, r, &item); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 
@@ -97,7 +111,7 @@ func (h *MenuHandler) UpdateItem(w http.ResponseWriter, r *http.Request) {
 
 	var item domain.MenuItem
 	if err := decodeJSON(w, r, &item); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 
@@ -134,7 +148,7 @@ func (h *MenuHandler) UpdateAvailability(w http.ResponseWriter, r *http.Request)
 		Available bool `json:"available"` // новое наличие
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 
@@ -149,7 +163,11 @@ func (h *MenuHandler) UpdateAvailability(w http.ResponseWriter, r *http.Request)
 // ListCategories - отдаёт категории своего заведения постранично.
 func (h *MenuHandler) ListCategories(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
-	page, perPage := paginationFromQuery(r)
+	page, perPage, err := paginationFromQuery(r)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	categories, total, err := h.menuService.ListCategories(r.Context(), venueID, page, perPage)
 	if err != nil {
@@ -166,7 +184,7 @@ func (h *MenuHandler) CreateCategory(w http.ResponseWriter, r *http.Request) {
 
 	var cat domain.MenuCategory
 	if err := decodeJSON(w, r, &cat); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 

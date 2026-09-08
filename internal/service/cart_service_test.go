@@ -131,3 +131,30 @@ func TestCartManage(t *testing.T) {
 		require.Empty(t, cart.updatedQty)
 	})
 }
+
+func TestCartOptionsAreValidatedAndSeparateLineItems(t *testing.T) {
+	t.Run("different selections create a separate line", func(t *testing.T) {
+		cart, items := cartTestSetup()
+		items.items["item-1"].Options = []byte(`[{"name":"size","options":["small","medium","large"],"default":"medium"}]`)
+		cart.items = []domain.CartItem{{ID: "ci-small", CartID: "cart-1", MenuItemID: "item-1", Quantity: 1, Options: []byte(`{"size":"small"}`)}}
+		svc := NewCartService(cart, items)
+		_, err := svc.AddItem(context.Background(), "user-1", "venue-1", domain.AddToCartRequest{
+			MenuItemID: "item-1", Quantity: 1, Options: []byte(`{"size":"large"}`),
+		})
+		require.NoError(t, err)
+		require.Len(t, cart.added, 1)
+		require.JSONEq(t, `{"size":"large"}`, string(cart.added[0].Options))
+		require.Empty(t, cart.updatedQty)
+	})
+
+	t.Run("unknown selection is rejected", func(t *testing.T) {
+		cart, items := cartTestSetup()
+		items.items["item-1"].Options = []byte(`[{"name":"size","options":["small","medium","large"],"default":"medium"}]`)
+		svc := NewCartService(cart, items)
+		_, err := svc.AddItem(context.Background(), "user-1", "venue-1", domain.AddToCartRequest{
+			MenuItemID: "item-1", Quantity: 1, Options: []byte(`{"size":"giant"}`),
+		})
+		require.ErrorIs(t, err, domain.ErrValidation)
+		require.Empty(t, cart.added)
+	})
+}

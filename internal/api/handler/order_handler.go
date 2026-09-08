@@ -31,7 +31,7 @@ func (h *OrderHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var req domain.CreateOrderRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 	req.IdempotencyKey = r.Header.Get("Idempotency-Key")
@@ -53,7 +53,11 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page, perPage := paginationFromQuery(r)
+	page, perPage, err := paginationFromQuery(r)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	orders, total, err := h.orderService.ListByUser(r.Context(), userID, page, perPage)
 	if err != nil {
@@ -66,9 +70,14 @@ func (h *OrderHandler) List(w http.ResponseWriter, r *http.Request) {
 
 // GetByID - отдаёт заказ по id из пути.
 func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
-	order, err := h.orderService.GetByID(r.Context(), id)
+	order, err := h.orderService.GetByUser(r.Context(), userID, id)
 	if err != nil {
 		writeServiceError(w, r, h.logger, err)
 		return
@@ -77,11 +86,27 @@ func (h *OrderHandler) GetByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"data": order})
 }
 
+// VenueGetByID - отдаёт детали заказа только заведению-владельцу.
+func (h *OrderHandler) VenueGetByID(w http.ResponseWriter, r *http.Request) {
+	venueID, _ := middleware.GetVenueID(r.Context())
+	order, err := h.orderService.GetByVenue(r.Context(), venueID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeServiceError(w, r, h.logger, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": order})
+}
+
 // Track - отдаёт короткий статус заказа для отслеживания.
 func (h *OrderHandler) Track(w http.ResponseWriter, r *http.Request) {
+	userID := r.Header.Get("X-User-ID")
+	if userID == "" {
+		writeError(w, r, http.StatusUnauthorized, "X-User-ID header required")
+		return
+	}
 	id := chi.URLParam(r, "id")
 
-	order, err := h.orderService.GetByID(r.Context(), id)
+	order, err := h.orderService.GetByUser(r.Context(), userID, id)
 	if err != nil {
 		writeServiceError(w, r, h.logger, err)
 		return
@@ -119,7 +144,21 @@ func (h *OrderHandler) Repeat(w http.ResponseWriter, r *http.Request) {
 func (h *OrderHandler) VenueList(w http.ResponseWriter, r *http.Request) {
 	venueID, _ := middleware.GetVenueID(r.Context())
 	status := r.URL.Query().Get("status")
-	page, perPage := paginationFromQuery(r)
+	if status != "" {
+		switch domain.OrderStatus(status) {
+		case domain.OrderStatusPending, domain.OrderStatusAccepted, domain.OrderStatusPreparing,
+			domain.OrderStatusReady, domain.OrderStatusDelivering, domain.OrderStatusDelivered,
+			domain.OrderStatusCancelled:
+		default:
+			writeError(w, r, http.StatusBadRequest, "invalid status filter")
+			return
+		}
+	}
+	page, perPage, err := paginationFromQuery(r)
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	orders, total, err := h.orderService.ListByVenue(r.Context(), venueID, status, page, perPage)
 	if err != nil {
@@ -165,7 +204,7 @@ func (h *OrderHandler) VenueUpdateStatus(w http.ResponseWriter, r *http.Request)
 		Status string `json:"status"` // новый статус
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 

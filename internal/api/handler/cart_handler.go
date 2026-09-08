@@ -59,11 +59,11 @@ func (h *CartHandler) AddItem(w http.ResponseWriter, r *http.Request) {
 
 	var req domain.AddToCartRequest
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 
-	if req.Quantity <= 0 {
+	if req.Quantity == 0 {
 		req.Quantity = 1
 	}
 
@@ -90,7 +90,7 @@ func (h *CartHandler) UpdateItemQuantity(w http.ResponseWriter, r *http.Request)
 		Quantity int `json:"quantity"` // новое количество
 	}
 	if err := decodeJSON(w, r, &req); err != nil {
-		writeError(w, r, http.StatusBadRequest, "invalid request body")
+		writeDecodeError(w, r, err)
 		return
 	}
 

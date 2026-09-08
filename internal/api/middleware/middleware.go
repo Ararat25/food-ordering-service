@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,7 +21,7 @@ const RequestIDKey contextKey = "request_id"
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestID := r.Header.Get("X-Request-ID")
-		if requestID == "" {
+		if !validRequestID(requestID) {
 			requestID = uuid.New().String()
 		}
 
@@ -27,6 +29,29 @@ func RequestID(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", requestID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func validRequestID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_.:", r)) {
+			return false
+		}
+	}
+	return true
+}
+
+// WriteError writes the shared API error envelope for middleware failures.
+func WriteError(w http.ResponseWriter, r *http.Request, status int, message string) {
+	body := map[string]any{"error": message, "code": status}
+	if requestID, ok := r.Context().Value(RequestIDKey).(string); ok {
+		body["request_id"] = requestID
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // Logging - пишет в лог метод, путь, статус и время каждого запроса.
