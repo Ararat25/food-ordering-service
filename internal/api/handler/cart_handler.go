@@ -8,7 +8,7 @@ import (
 	"avito-kitchen/internal/domain"
 )
 
-// CartHandler - HTTP для корзины.
+// CartHandler - обработчик для корзины.
 type CartHandler struct {
 	cartService domain.CartService // логика корзины
 }

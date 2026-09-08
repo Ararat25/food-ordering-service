@@ -44,7 +44,7 @@ type OrderStatusUpdate struct {
 	Status  string `json:"status"`   // новый статус
 }
 
-// apiClient - ходит в основной сервис от имени заведения.
+// apiClient - клиент основного сервиса.
 type apiClient struct {
 	baseURL string       // адрес основного сервиса
 	apiKey  string       // ключ заведения
@@ -71,7 +71,7 @@ func (c *apiClient) do(ctx context.Context, method, path string, body io.Reader)
 	return c.client.Do(req)
 }
 
-// venueOrder - заказ заведения в коротком виде.
+// venueOrder - заказ заведения.
 type venueOrder struct {
 	ID     string `json:"id"`     // id заказа
 	Status string `json:"status"` // текущий статус
@@ -117,7 +117,6 @@ func (c *apiClient) acceptOrder(ctx context.Context, orderID string) error {
 }
 
 // orderSyncer - умеет забирать заказы и принимать их.
-// Реализация — apiClient, в тестах подменяется заглушкой.
 type orderSyncer interface {
 	listOrders(ctx context.Context) ([]venueOrder, error)
 	acceptOrder(ctx context.Context, orderID string) error

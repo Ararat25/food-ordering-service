@@ -19,6 +19,6 @@ type AddToCartRequest struct {
 
 // CreateReviewRequest - данные для создания отзыва.
 type CreateReviewRequest struct {
-	Rating  int    `json:"rating"`  // оценка от 1 до 5
+	Rating  int    `json:"rating"`  // оценка
 	Comment string `json:"comment"` // текст отзыва
 }

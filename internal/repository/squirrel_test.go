@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// TestStatementBuilderUsesDollarPlaceholders - проверяет, что билдер ставит плейсхолдеры вида $1.
 func TestStatementBuilderUsesDollarPlaceholders(t *testing.T) {
 	query, _, err := sb.Select("*").From("orders").Where("id = ?", "x").ToSql()
 	if err != nil {

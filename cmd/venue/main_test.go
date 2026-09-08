@@ -8,11 +8,10 @@ import (
 	"testing"
 )
 
-// stubSyncer - заглушка orderSyncer: отдаёт заранее заданные заказы и пишет принятые.
 type stubSyncer struct {
-	orders   []venueOrder // что вернёт listOrders
-	listErr  error        // ошибка listOrders, если нужна
-	accepted []string     // какие заказы приняли
+	orders   []venueOrder
+	listErr  error
+	accepted []string
 }
 
 func (s *stubSyncer) listOrders(_ context.Context) ([]venueOrder, error) {
@@ -24,12 +23,10 @@ func (s *stubSyncer) acceptOrder(_ context.Context, orderID string) error {
 	return nil
 }
 
-// quietLogger - логгер, молча глотающий вывод тестов.
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-// TestSyncOnceAcceptsPending - первый ожидающий заказ принимают.
 func TestSyncOnceAcceptsPending(t *testing.T) {
 	stub := &stubSyncer{orders: []venueOrder{
 		{ID: "order-1", Status: "accepted"},
@@ -44,7 +41,6 @@ func TestSyncOnceAcceptsPending(t *testing.T) {
 	}
 }
 
-// TestSyncOnceWithoutPending - без ожидающих никого не трогают.
 func TestSyncOnceWithoutPending(t *testing.T) {
 	stub := &stubSyncer{orders: []venueOrder{
 		{ID: "order-1", Status: "accepted"},
@@ -58,7 +54,6 @@ func TestSyncOnceWithoutPending(t *testing.T) {
 	}
 }
 
-// TestSyncOnceFetchError - ошибка получения заказов не роняет синхронизацию.
 func TestSyncOnceFetchError(t *testing.T) {
 	stub := &stubSyncer{listErr: errors.New("connection refused")}
 

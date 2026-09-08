@@ -15,8 +15,6 @@ linters:
     - nakedret
   settings:
     revive:
-      # exported/package-comments отключены осознанно: doc-комментарии на каждую
-      # сущность для MVP избыточны, error-strings (строчные тексты ошибок) проверяем.
       rules:
         - name: error-strings
 formatters:
