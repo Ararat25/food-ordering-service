@@ -116,8 +116,15 @@ func (c *apiClient) acceptOrder(ctx context.Context, orderID string) error {
 	return nil
 }
 
+// orderSyncer - умеет забирать заказы и принимать их.
+// Реализация — apiClient, в тестах подменяется заглушкой.
+type orderSyncer interface {
+	listOrders(ctx context.Context) ([]venueOrder, error)
+	acceptOrder(ctx context.Context, orderID string) error
+}
+
 // syncOnce - забирает заказы и принимает первый ожидающий.
-func syncOnce(ctx context.Context, logger *slog.Logger, client *apiClient) {
+func syncOnce(ctx context.Context, logger *slog.Logger, client orderSyncer) {
 	orders, err := client.listOrders(ctx)
 	if err != nil {
 		logger.Warn("venue sync: failed to fetch orders", "error", err)
@@ -146,7 +153,7 @@ func syncOnce(ctx context.Context, logger *slog.Logger, client *apiClient) {
 }
 
 // pollLoop - крутит синхронизацию по таймеру, пока не отменят контекст.
-func pollLoop(ctx context.Context, logger *slog.Logger, client *apiClient, interval time.Duration) {
+func pollLoop(ctx context.Context, logger *slog.Logger, client orderSyncer, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
